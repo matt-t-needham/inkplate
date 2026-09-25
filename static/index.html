@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>inkplate_dash</title>
+<style>
+  /* Catppuccin Mocha — house palette (matches bix-ai / bix-demucs) */
+  :root {
+    --bg:#1e1e2e; --surface0:#313244; --surface1:#45475a;
+    --text:#cdd6f4; --subtext:#a6adc8;
+    --yellow:#f9e2af; --blue:#89b4fa; --green:#a6e3a1; --red:#f38ba8; --mauve:#cba6f7;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.5 system-ui, -apple-system, sans-serif;
+  }
+  header {
+    display:flex; align-items:center; gap:14px;
+    padding:14px 22px; border-bottom:1px solid var(--surface1);
+  }
+  header h1 { font-size:17px; margin:0; }
+  header h1 em { color:var(--mauve); font-style:normal; }
+  .dev-badge { display:flex; align-items:center; gap:7px; color:var(--subtext); font-size:13px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--surface1); }
+  .dot.ok   { background:var(--green); }
+  .dot.warn { background:var(--yellow); }
+  .dot.bad  { background:var(--red); }
+  header .spacer { margin-left:auto; }
+
+  main {
+    display:grid; grid-template-columns: 1fr 360px; gap:18px;
+    padding:18px 22px; max-width:1400px; margin:0 auto;
+  }
+  @media (max-width: 980px) { main { grid-template-columns:1fr; } }
+
+  .card { background:var(--surface0); border:1px solid var(--surface1); border-radius:10px; padding:16px; }
+  .card h2 {
+    margin:0 0 12px; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--subtext); font-weight:600;
+  }
+  .col { display:flex; flex-direction:column; gap:18px; min-width:0; }
+
+  /* Preview */
+  #preview-img {
+    width:100%; aspect-ratio:4/3; object-fit:contain; border-radius:6px;
+    background:#11111b; display:block; border:1px solid var(--surface1);
+  }
+  .preview-bar { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .seg { display:flex; border:1px solid var(--surface1); border-radius:7px; overflow:hidden; }
+  .seg button {
+    background:none; border:none; color:var(--subtext); padding:6px 12px; cursor:pointer;
+    font:inherit; font-size:13px;
+  }
+  .seg button.active { background:var(--surface1); color:var(--text); }
+  .meta-line { color:var(--subtext); font-size:12px; margin-top:8px; }
+  .meta-line b { color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
+
+  button.primary {
+    background:var(--mauve); color:#11111b; border:none; border-radius:7px;
+    padding:7px 14px; font:inherit; font-weight:600; cursor:pointer;
+  }
+  button.primary:disabled { opacity:.5; cursor:default; }
+  button.ghost {
+    background:none; border:1px solid var(--surface1); color:var(--text);
+    border-radius:7px; padding:7px 14px; font:inherit; cursor:pointer;
+  }
+  .push-note { color:var(--subtext); font-size:12px; }
+
+  /* Config form */
+  .field { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:11px; }
+  .field label { color:var(--subtext); }
+  .field select, .field input[type=number] {
+    background:var(--bg); color:var(--text); border:1px solid var(--surface1);
+    border-radius:6px; padding:6px 8px; font:inherit; width:140px;
+    font-variant-numeric:tabular-nums;
+  }
+  .field input[type=checkbox] { accent-color:var(--mauve); width:16px; height:16px; }
+  #save-msg { font-size:12px; margin-left:8px; }
+  #save-msg.ok { color:var(--green); } #save-msg.err { color:var(--red); }
+
+  /* Stats grid (house .hi-stat pattern) */
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .stat { background:var(--bg); border-radius:7px; padding:8px 10px; }
+  .stat .k { color:var(--subtext); font-size:11px; }
+  .stat .v { font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .stat .v.blue { color:var(--blue); } .stat .v.green { color:var(--green); }
+  .stat .v.yellow { color:var(--yellow); } .stat .v.red { color:var(--red); }
+
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th { text-align:left; color:var(--subtext); font-weight:500; padding:4px 6px; }
+  td { padding:4px 6px; border-top:1px solid var(--surface1); font-variant-numeric:tabular-nums; }
+  .empty { color:var(--subtext); font-size:13px; padding:6px 0; }
+
+  /* Event log */
+  #events { display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto; }
+  .evt { display:flex; gap:8px; font-size:12px; align-items:baseline; }
+  .evt .ts { color:var(--subtext); white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .evt .kind { flex-shrink:0; padding:0 6px; border-radius:5px; font-size:11px; background:var(--surface1); }
+  .evt .kind.render { color:var(--blue); } .evt .kind.config { color:var(--mauve); }
+  .evt .kind.error, .evt .kind.device_error { color:var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <h1>inkplate<em>_</em>dash</h1>
+  <div class="dev-badge"><span class="dot" id="dev-dot"></span><span id="dev-status">loading…</span></div>
+  <div class="spacer"></div>
+  <div class="dev-badge" id="clock"></div>
+</header>
+
+<main>
+  <div class="col">
+    <div class="card">
+      <h2>Preview — what the panel will show</h2>
+      <img id="preview-img" alt="dashboard preview">
+      <div class="preview-bar">
+        <div class="seg" id="mode-seg">
+          <button data-mode="panel" class="active">panel sim</button>
+          <button data-mode="dithered">dithered</button>
+          <button data-mode="raw">raw</button>
+        </div>
+        <button class="primary" id="btn-render">Render now → push</button>
+        <button class="ghost" id="btn-cycle-animal">Next animal</button>
+        <button class="ghost" id="btn-cycle-question">Next question</button>
+        <span class="push-note">push bumps the version; the device redraws at its next wake</span>
+      </div>
+      <div class="meta-line" id="render-meta">no render yet</div>
+    </div>
+
+    <div class="card">
+      <h2>Device check-ins</h2>
+      <div class="stats" id="dev-stats" style="margin-bottom:12px"></div>
+      <table>
+        <thead><tr><th>when</th><th>batt</th><th>rssi</th><th>boot#</th><th>ver</th><th>wake</th><th>ms</th><th>error</th></tr></thead>
+        <tbody id="checkin-rows"></tbody>
+      </table>
+      <div class="empty" id="checkin-empty" hidden>No check-ins yet — the device hasn't phoned home. Expected until it arrives and is flashed.</div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="card">
+      <h2>Configuration</h2>
+      <div class="field"><label for="f-screen">Screen</label><select id="f-screen"></select></div>
+      <div class="field"><label for="f-refresh" title="How often the panel itself redraws — governs how fresh the temperature is.">Refresh cadence (min)</label><input id="f-refresh" type="number" min="1" max="1440"></div>
+      <div class="field"><label for="f-animal-period" title="How often a new engraving is chosen.">Animal cadence (days)</label><input id="f-animal-period" type="number" min="1" max="365"></div>
+      <div class="field"><label for="f-question-period" title="How often a new talking point is chosen.">Question cadence (days)</label><input id="f-question-period" type="number" min="1" max="365"></div>
+      <div class="field"><label for="f-tethered">Tethered mode (no deep sleep)</label><input id="f-tethered" type="checkbox"></div>
+      <div class="field"><label for="f-poll">Tethered poll (sec)</label><input id="f-poll" type="number" min="5" max="600"></div>
+      <div class="field"><label for="f-location">Location name</label><input id="f-location" type="text" maxlength="60" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:6px 8px;font:inherit"></div>
+      <div class="field"><label for="f-lat">Latitude</label><input id="f-lat" type="number" step="0.0001" min="-90" max="90"></div>
+      <div class="field"><label for="f-lon">Longitude</label><input id="f-lon" type="number" step="0.0001" min="-180" max="180"></div>
+      <div class="field"><label for="f-nowplaying" title="Draws the current RAGE track. Only sensible on mains power with a short cadence — the device still only redraws when pixels change.">Now playing (rage.bix)</label><input id="f-nowplaying" type="checkbox"></div>
+      <div style="display:flex;align-items:center">
+        <button class="primary" id="btn-save">Save</button><span id="save-msg"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Server events</h2>
+      <div id="events"></div>
+      <div class="empty" id="events-empty" hidden>No events yet.</div>
+    </div>
+  </div>
+</main>
+
+<script>
+// All URLs are relative on purpose: this page is served both at :3008/ and at
+// the metrics site under /inkplate/ — absolute paths would break the latter.
+const $ = id => document.getElementById(id);
+let previewMode = 'panel';
+let stateCache = null;
+
+function fmtTs(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  return d.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' +
+         d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+function ago(ts) {
+  const s = Math.max(0, (Date.now()/1000) - ts);
+  if (s < 90) return Math.round(s) + 's ago';
+  if (s < 5400) return Math.round(s/60) + 'm ago';
+  if (s < 172800) return (s/3600).toFixed(1) + 'h ago';
+  return Math.round(s/86400) + 'd ago';
+}
+
+function refreshPreviewImg() {
+  $('preview-img').src = 'api/preview.png?mode=' + previewMode + '&t=' + Date.now();
+}
+
+$('mode-seg').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  previewMode = btn.dataset.mode;
+  document.querySelectorAll('#mode-seg button').forEach(b => b.classList.toggle('active', b === btn));
+  refreshPreviewImg();
+});
+
+$('btn-render').addEventListener('click', async () => {
+  const btn = $('btn-render');
+  btn.disabled = true; btn.textContent = 'Rendering…';
+  try {
+    const r = await fetch('api/render', {method:'POST'});
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    await loadState();
+    refreshPreviewImg();
+  } catch (e) {
+    alert('Render failed: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Render now → push';
+  }
+});
+
+async function cycle(what, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await fetch('api/cycle', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({what}),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    await loadState();
+    refreshPreviewImg();
+  } catch (e) {
+    alert('Cycle failed: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+$('btn-cycle-animal').addEventListener('click', e => cycle('animal', e.target));
+$('btn-cycle-question').addEventListener('click', e => cycle('question', e.target));
+
+$('btn-save').addEventListener('click', async () => {
+  const msg = $('save-msg');
+  msg.textContent = ''; msg.className = '';
+  try {
+    const r = await fetch('api/config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        screen: $('f-screen').value,
+        refresh_minutes: parseInt($('f-refresh').value, 10),
+        tethered: $('f-tethered').checked,
+        tethered_poll_seconds: parseInt($('f-poll').value, 10),
+        animal_period_days: parseInt($('f-animal-period').value, 10),
+        question_period_days: parseInt($('f-question-period').value, 10),
+        location_name: $('f-location').value,
+        latitude: parseFloat($('f-lat').value),
+        longitude: parseFloat($('f-lon').value),
+        show_now_playing: $('f-nowplaying').checked,
+      }),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    msg.textContent = 'saved'; msg.className = 'ok';
+    await loadState();
+    refreshPreviewImg();  // screen may have changed
+  } catch (e) {
+    msg.textContent = 'failed: ' + e.message; msg.className = 'err';
+  }
+  setTimeout(() => { msg.textContent = ''; }, 3000);
+});
+
+function renderDeviceBadge(st) {
+  const dot = $('dev-dot'), label = $('dev-status');
+  const last = st.last_checkin;
+  if (!last) { dot.className = 'dot'; label.textContent = 'device: never seen (pre-arrival)'; return; }
+  const ageS = (Date.now()/1000) - last.ts;
+  const expected = st.config.tethered ? st.config.tethered_poll_seconds * 3
+                                      : st.config.refresh_minutes * 60 * 2.5;
+  if (ageS < expected) { dot.className = 'dot ok'; label.textContent = 'device: online · ' + ago(last.ts); }
+  else { dot.className = 'dot bad'; label.textContent = 'device: missing · last seen ' + ago(last.ts); }
+}
+
+function renderState(st) {
+  stateCache = st;
+  renderDeviceBadge(st);
+
+  // render meta
+  const m = st.render;
+  $('render-meta').innerHTML = m
+    ? `screen <b>${m.screen}</b> · version <b>${m.image_version}</b> · rendered <b>${fmtTs(m.rendered_at)}</b>` +
+      ` (${ago(m.rendered_at)}) · <b>${m.render_ms}ms</b> · ${m.width}×${m.height}`
+    : 'no render yet';
+
+  // config form — don't clobber fields the user is editing
+  const focused = document.activeElement && document.activeElement.id;
+  const sel = $('f-screen');
+  if (sel.options.length !== st.screens.length) {
+    sel.innerHTML = st.screens.map(s => `<option value="${s}">${s}</option>`).join('');
+  }
+  if (focused !== 'f-screen') sel.value = st.config.screen;
+  if (focused !== 'f-refresh') $('f-refresh').value = st.config.refresh_minutes;
+  $('f-tethered').checked = st.config.tethered;
+  if (focused !== 'f-poll') $('f-poll').value = st.config.tethered_poll_seconds;
+  if (focused !== 'f-animal-period') $('f-animal-period').value = st.config.animal_period_days;
+  if (focused !== 'f-question-period') $('f-question-period').value = st.config.question_period_days;
+  if (focused !== 'f-location') $('f-location').value = st.config.location_name;
+  if (focused !== 'f-lat') $('f-lat').value = st.config.latitude;
+  if (focused !== 'f-lon') $('f-lon').value = st.config.longitude;
+  $('f-nowplaying').checked = st.config.show_now_playing;
+
+  // device stats
+  const last = st.last_checkin;
+  const stats = [];
+  if (last) {
+    stats.push(['Battery', last.battery_voltage != null ? last.battery_voltage.toFixed(2) + ' V' : '—',
+                last.battery_voltage != null && last.battery_voltage < 3.5 ? 'red' : 'green']);
+    stats.push(['Wi-Fi RSSI', last.rssi != null ? last.rssi + ' dBm' : '—', 'blue']);
+    stats.push(['Boot count', last.boot_count ?? '—', '']);
+    stats.push(['Shown version', last.shown_version ?? '—',
+                st.render && last.shown_version === st.render.image_version ? 'green' : 'yellow']);
+  } else {
+    stats.push(['Last seen', 'never', '']);
+    stats.push(['Server version', st.render ? st.render.image_version : st.config.image_version, 'blue']);
+  }
+  $('dev-stats').innerHTML = stats.map(([k, v, c]) =>
+    `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
+
+  // checkin table
+  const rows = st.checkins || [];
+  $('checkin-empty').hidden = rows.length > 0;
+  $('checkin-rows').innerHTML = rows.map(c => `<tr>
+    <td>${fmtTs(c.ts)}</td>
+    <td>${c.battery_voltage != null ? c.battery_voltage.toFixed(2) : '—'}</td>
+    <td>${c.rssi ?? '—'}</td>
+    <td>${c.boot_count ?? '—'}</td>
+    <td>${c.shown_version ?? '—'}</td>
+    <td>${c.wake_reason ?? '—'}</td>
+    <td>${c.duration_ms ?? '—'}</td>
+    <td style="color:var(--red)">${c.error ? String(c.error).slice(0,80) : ''}</td>
+  </tr>`).join('');
+
+  // events
+  const evts = st.events || [];
+  $('events-empty').hidden = evts.length > 0;
+  $('events').innerHTML = evts.map(e => `<div class="evt">
+    <span class="ts">${fmtTs(e.ts)}</span>
+    <span class="kind ${e.kind}">${e.kind}</span>
+    <span>${(e.message || '').replace(/</g, '&lt;')}</span>
+  </div>`).join('');
+}
+
+async function loadState() {
+  try {
+    const r = await fetch('api/state');
+    if (!r.ok) throw new Error(r.status);
+    renderState(await r.json());
+  } catch (e) {
+    $('dev-dot').className = 'dot bad';
+    $('dev-status').textContent = 'server unreachable';
+  }
+}
+
+setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
+setInterval(loadState, 10000);
+loadState().then(refreshPreviewImg);
+</script>
+</body>
+</html>

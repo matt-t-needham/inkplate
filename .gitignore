@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+logs/
+firmware/inkplate_dash/config.h
+.pytest_cache/

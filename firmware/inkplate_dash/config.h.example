@@ -1,0 +1,14 @@
+// Copy this file to config.h (same folder) and fill in real values.
+// config.h is gitignored — credentials never land in the repo.
+
+#pragma once
+
+#define WIFI_SSID "your-ssid"
+#define WIFI_PASS "your-password"
+
+// The HTPC, reachable over LAN. Port 3008 is the inkplate-dash container.
+// Use the LAN IP, not localhost — this runs on the device.
+#define SERVER_URL "http://<server-ip>:3008"
+
+// Bump when you flash a new build; shows up in the control pane check-ins.
+#define FW_VERSION "0.1.0"
