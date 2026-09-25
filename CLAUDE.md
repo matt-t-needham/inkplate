@@ -22,7 +22,7 @@ Module map:
 | `renderer.py` | Orchestration + disk cache (`data/render/{raw,dithered,panel}.png` + `meta.json`); `ensure_fresh()` re-renders on staleness/screen change; serves stale frame if a render fails |
 | `palette.py` | Spectra-6 palettes + Floyd-Steinberg dither (Pillow C core). `DITHER_PALETTE` order = firmware color indexes — don't reorder |
 | `state.py` | `config.json` (atomic writes) + self-capping ndjson logs (`events`, `checkins`) |
-| `static/index.html` | Single-file control pane, Catppuccin Mocha, no build step. **Relative URLs only** — served at both `:3008/` and `:9000/inkplate/` |
+| `static/index.html` | Single-file control pane, Catppuccin Mocha, no build step. **Relative URLs only** — served at `:3008/` (LAN, device + pane) and `inkplate.bix.computer` (tunnel, behind Access) |
 | `firmware/inkplate_dash/` | Arduino sketch + `config.h.example` (real `config.h` is gitignored — Wi-Fi creds) |
 
 ## Device protocol (firmware ↔ server contract)
