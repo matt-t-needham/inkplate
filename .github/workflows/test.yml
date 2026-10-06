@@ -1,0 +1,25 @@
+# Runs the same gate the deploy uses: the Dockerfile's `test` stage builds the
+# runtime image's deps and runs pytest — a failing test fails the build.
+# The job id `test` is the status check name to require in the branch ruleset.
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build test stage (runs pytest)
+        run: docker build --target test --progress=plain .
