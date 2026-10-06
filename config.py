@@ -38,6 +38,11 @@ DEFAULT_LATITUDE = float(os.environ.get("INKPLATE_LAT", "45.5152"))
 DEFAULT_LONGITUDE = float(os.environ.get("INKPLATE_LON", "-122.6784"))
 DEFAULT_LOCATION_NAME = os.environ.get("INKPLATE_LOCATION", "Portland, OR")
 
+# Snow report location (seasonal; toggled in the pane). Mt Hood Meadows base.
+DEFAULT_SNOW_LATITUDE = float(os.environ.get("INKPLATE_SNOW_LAT", "45.3317"))
+DEFAULT_SNOW_LONGITUDE = float(os.environ.get("INKPLATE_SNOW_LON", "-121.6649"))
+DEFAULT_SNOW_LOCATION_NAME = os.environ.get("INKPLATE_SNOW_LOCATION", "Mt Hood Meadows")
+SNOW_TTL_S = int(os.environ.get("INKPLATE_SNOW_TTL_S", "3600"))
 WEATHER_TTL_S = int(os.environ.get("INKPLATE_WEATHER_TTL_S", "1800"))
 NOW_PLAYING_TTL_S = int(os.environ.get("INKPLATE_NOW_PLAYING_TTL_S", "90"))
 # When the now-playing widget is enabled, renders go stale this fast instead

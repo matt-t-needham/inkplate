@@ -15,10 +15,20 @@ House style, so additions match:
 
 Categories are kept deliberately even (30 each) so no one flavour dominates
 the rotation. They are grouping only — the panel shows the question alone.
+
+BANK is the shipped default. The control pane can edit, add, and veto
+questions; once it does, the live bank is `data/questions.json` and BANK is
+only the seed (and the "reset to defaults" target). Changing the bank's size
+reshuffles the cycle, so the current pick moves on — which is what a veto
+wants anyway. Editing a question's wording in place keeps the pick put.
 """
 
+import json
+import os
 import random
 from datetime import date
+
+import config
 
 BANK = [
     # ── personal ──────────────────────────────────────────────────────────────
@@ -151,6 +161,55 @@ BANK = [
 ]
 
 
+MAX_TEXT = 300
+
+
+def _bank_path():
+    return config.DATA_DIR / "questions.json"
+
+
+def bank() -> list[tuple[str, str]]:
+    """The live bank: the pane's edited copy if one exists, else BANK."""
+    try:
+        rows = json.loads(_bank_path().read_text())
+        out = [(str(c), str(t)) for c, t in rows if str(t).strip()]
+        if out:
+            return out
+    except FileNotFoundError:
+        pass
+    except (ValueError, TypeError, OSError):
+        pass  # corrupt override: fall back to the shipped bank
+    return list(BANK)
+
+
+def save_bank(rows) -> list[tuple[str, str]]:
+    """Validate and persist an edited bank (atomic). Raises ValueError."""
+    clean = []
+    for row in rows:
+        if isinstance(row, dict):
+            c, t = row.get("category", ""), row.get("text", "")
+        else:
+            c, t = row
+        c, t = str(c).strip()[:40] or "misc", " ".join(str(t).split())
+        if not t:
+            continue
+        if len(t) > MAX_TEXT:
+            raise ValueError(f"question too long ({len(t)} > {MAX_TEXT}): {t[:40]}…")
+        clean.append((c, t))
+    if not clean:
+        raise ValueError("the bank needs at least one question")
+    p = _bank_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(clean, indent=1, ensure_ascii=False))
+    os.replace(tmp, p)
+    return clean
+
+
+def reset_bank() -> None:
+    _bank_path().unlink(missing_ok=True)
+
+
 def slot_for(day: date, period_days: int = 1, offset: int = 0) -> int:
     """The content slot for a date: an integer that advances once every
     `period_days`, plus the pane's manual cycle `offset`."""
@@ -163,9 +222,15 @@ def question_for(day: date, offset: int = 0, period_days: int = 1) -> dict:
     question (renders are reproducible). `period_days` sets how often it
     changes (1 = daily); `offset` advances the sequence — the control pane's
     "next question" button."""
-    n = len(BANK)
+    i = index_for(day, offset, period_days)
+    category, text = bank()[i]
+    return {"category": category, "text": text}
+
+
+def index_for(day: date, offset: int = 0, period_days: int = 1) -> int:
+    """Index into bank() of the question question_for() picks."""
+    n = len(bank())
     ordinal = slot_for(day, period_days, offset)
     cycle, pos = divmod(ordinal, n)
     perm = random.Random(cycle).sample(range(n), n)
-    category, text = BANK[perm[pos]]
-    return {"category": category, "text": text}
+    return perm[pos]

@@ -364,8 +364,11 @@ def dashboard(width: int, height: int) -> Image.Image:
 
     weather = datasources.get_weather(cfg["latitude"], cfg["longitude"])
     animal = datasources.get_animal(offset=cfg["animal_offset"],
-                                    period_days=cfg["animal_period_days"])
+                                    period_days=cfg["animal_period_days"],
+                                    vetoed=cfg["vetoed_animals"])
     now_playing = datasources.get_now_playing() if cfg["show_now_playing"] else None
+    snow = (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
+            if cfg["show_snow"] else None)
     q = questions.question_for(date.today(), cfg["question_offset"],
                                cfg["question_period_days"])
 
@@ -463,82 +466,150 @@ def dashboard(width: int, height: int) -> Image.Image:
                    (tx - X(13), ny + Y(13))], fill=GREEN)
         d.text((tx, ny), txt, font=f_np, fill=BLACK, **halo)
 
-    # ── weather, top-left: current conditions and sun times are centered on
-    #    the three-day row below them ───────────────────────────────────────────
-    if weather:
-        # Centre of the three-day row: columns sit at 170/435/700.
-        col_x = [170 + i * 265 for i in range(3)]
-        CX = X(col_x[1])
+    # ── weather, top-left, everything flush to one left edge: today's
+    #    forecast glyph (what the day will do — the window shows what it's
+    #    doing now) beside the current temperature and today's high; sunrise/
+    #    sunset; then the next two days ──────────────────────────────────────
+    LX = X(52)
+    if weather and weather.get("days"):
+        today = weather["days"][0]
+        kind = datasources.icon_kind(today["code"])
+        icon_r = Y(62)
+        icon_w = _weather_icon_width(d, icon_r, kind)
+        _weather_icon(d, LX + icon_w // 2, Y(132), icon_r, kind)
+        x = LX + icon_w + X(28)
+        x += _temp_cf(d, x, Y(44), weather["current_c"], Y(130), BLACK, halo) + X(46)
+        f_lab = _font(Y(20), style="display")
+        d.text((x, Y(62)), "HIGH", font=f_lab, fill=BLACK, **halo)
+        _temp_cf(d, x, Y(92), today["tmax"], Y(64), RED, halo)
 
-        cur_c = weather["current_c"]
-        cur_kind = datasources.icon_kind(weather["current_code"])
-        icon_r = Y(72)
-        icon_w = _weather_icon_width(d, icon_r, cur_kind)
-        temp_w = _deg(d, 0, 0, str(round(cur_c)), Y(140), BLACK, measure=True)
-        gap = X(30)
-        left = CX - (icon_w + gap + temp_w) / 2
-        _weather_icon(d, int(left + icon_w / 2), Y(215), icon_r, cur_kind)
-        _deg(d, int(left + icon_w + gap), Y(115), str(round(cur_c)), Y(140),
-             BLACK, halo=halo)
+        f_t = _font(Y(30), style="display")
+        gsz = Y(60)
+        gw = _glyph_width(d, WI_SUNRISE, gsz)
+        x = LX
+        for txt, rising in ((_hhmm(today["sunrise"]), True),
+                            (_hhmm(today["sunset"]), False)):
+            _sun_horizon(d, x + gw // 2, Y(266), gsz, rising)
+            d.text((x + gw + X(10), Y(250)), txt, font=f_t, fill=BLACK, **halo)
+            x += gw + X(10) + d.textlength(txt, font=f_t) + X(44)
 
-        f_w = _deg(d, 0, 0, str(_c_to_f(cur_c)), Y(44), RED, suffix="F", measure=True)
-        _deg(d, int(CX - f_w / 2), Y(344), str(_c_to_f(cur_c)), Y(44), RED,
-             suffix="F", halo=halo)
-
-        today = weather["days"][0] if weather["days"] else None
-        if today:
-            f_t = _font(Y(34), style="display")
-            gsz, gpad, pair_gap = Y(78), X(14), X(56)
-            gw = _glyph_width(d, WI_SUNRISE, gsz)
-            rise, set_ = _hhmm(today["sunrise"]), _hhmm(today["sunset"])
-            w_rise = d.textlength(rise, font=f_t)
-            w_set = d.textlength(set_, font=f_t)
-            total = (gw + gpad + w_rise) + pair_gap + (gw + gpad + w_set)
-            x = CX - total / 2
-            _sun_horizon(d, int(x + gw / 2), Y(480), gsz, True)
-            d.text((x + gw + gpad, Y(464)), rise, font=f_t, fill=BLACK, **halo)
-            x += gw + gpad + w_rise + pair_gap
-            _sun_horizon(d, int(x + gw / 2), Y(480), gsz, False)
-            d.text((x + gw + gpad, Y(464)), set_, font=f_t, fill=BLACK, **halo)
-
-        for i, day in enumerate(weather["days"][:3]):
-            cx = X(col_x[i])
-            try:
-                name = ("TODAY", "TOMORROW")[i] if i < 2 else \
-                    date.fromisoformat(day["date"]).strftime("%a").upper()
-            except ValueError:
-                name = "?"
-            # Glyph on top, then the day name, then the temperatures.
-            _weather_icon(d, cx, Y(628), Y(40), datasources.icon_kind(day["code"]))
-            f_day = _font(Y(30), style="display")
-            d.text((cx - d.textlength(name, font=f_day) / 2, Y(714)),
-                   name, font=f_day, fill=BLACK, **halo)
-            # Low on the left, high on the right — everywhere, both units.
+        f_day = _font(Y(28), style="display")
+        for i, day in enumerate(weather["days"][1:3]):
+            cx0 = LX + i * X(256)
+            dk = datasources.icon_kind(day["code"])
+            iw = _weather_icon_width(d, Y(30), dk)
+            _weather_icon(d, cx0 + iw // 2, Y(356), Y(30), dk)
+            d.text((cx0 + iw + X(12), Y(340)), _dow(day["date"]), font=f_day,
+                   fill=BLACK, **halo)
+            # Low then high, both units.
             lo, hi = str(round(day["tmin"])), str(round(day["tmax"]))
-            w_lo = _deg(d, 0, 0, lo, Y(40), BLUE, measure=True)
-            w_hi = _deg(d, 0, 0, hi, Y(40), RED, measure=True)
-            px0 = int(cx - (w_lo + X(18) + w_hi) / 2)
-            _deg(d, px0, Y(784), lo, Y(40), BLUE, halo=halo)
-            _deg(d, px0 + w_lo + X(18), Y(784), hi, Y(40), RED, halo=halo)
-            fr = f"{_c_to_f(day['tmin'])} / {_c_to_f(day['tmax'])} °F"
-            f_fr = _font(Y(24))
-            d.text((cx - d.textlength(fr, font=f_fr) / 2, Y(854)),
-                   fr, font=f_fr, fill=BLACK, **halo)
+            w_lo = _deg(d, cx0, Y(396), lo, Y(38), BLUE, halo=halo)
+            _deg(d, cx0 + w_lo + X(18), Y(396), hi, Y(38), RED, halo=halo)
+            d.text((cx0, Y(452)),
+                   f"{_c_to_f(day['tmin'])} / {_c_to_f(day['tmax'])} °F",
+                   font=_font(Y(22)), fill=BLACK, **halo)
     else:
-        d.text((X(60), Y(200)), "weather unavailable",
+        d.text((LX, Y(100)), "weather unavailable",
                font=_font(Y(40), style="display"), fill=RED, **halo)
 
-    # ── talking point, running along the bottom border ───────────────────────
+    # ── talking point, running along the bottom border; the snow report
+    #    (when on) stacks directly above it ──────────────────────────────────
     f_q = _font(Y(40), style="serif_italic")
     qlines = _wrap(d, q["text"], f_q, X(1060))[:4]
     line_h = Y(54)
-    qy = height - Y(52) - line_h * len(qlines)
-    tx0 = X(52)
+    qtop = height - Y(52) - line_h * len(qlines)
+    qy = qtop
     for ln in qlines:
-        d.text((tx0, qy), ln, font=f_q, fill=BLACK, **halo)
+        d.text((LX, qy), ln, font=f_q, fill=BLACK, **halo)
         qy += line_h
 
+    if snow:
+        _snow_report(d, LX, qtop - Y(40), snow, X, Y, halo)
+
     return img
+
+
+# ── dashboard helpers: temperatures, snow report ─────────────────────────────
+
+SNOW_FLAKE = 0xf076   # wi-snowflake-cold
+SNOW_HEAVY_CM = 5     # a day at or above this is drawn in blue ("go skiing")
+
+
+def _dow(iso: str) -> str:
+    """'2026-12-16' -> 'Wed'. Day abbreviations everywhere, never TODAY/TOMORROW."""
+    try:
+        return date.fromisoformat(iso).strftime("%a")
+    except (TypeError, ValueError):
+        return "?"
+
+
+def _temp_cf(d: ImageDraw.ImageDraw, x: int, y: int, c: float, size: int, fill,
+             halo: dict, measure: bool = False) -> int:
+    """Big °C with the °F tucked small at its bottom-right. Returns width."""
+    big = str(round(c))
+    f_size = max(8, int(size * 0.30))
+    small = str(_c_to_f(c))
+    w_c = _deg(d, x, y, big, size, fill, measure=True)
+    w_f = _deg(d, 0, 0, small, f_size, RED if fill == BLACK else fill, suffix="F",
+               measure=True)
+    pad = int(size * 0.04)
+    if measure:
+        return w_c + pad + w_f
+    _deg(d, x, y, big, size, fill, halo=halo)
+    bottom = d.textbbox((x, y), big, font=_font(size, style="display"))[3]
+    fy = bottom - d.textbbox((0, 0), small, font=_font(f_size, style="display"))[3]
+    _deg(d, x + w_c + pad, fy, small, f_size, RED if fill == BLACK else fill,
+         suffix="F", halo=halo)
+    return w_c + pad + w_f
+
+
+def _cm(v) -> int:
+    return round(v or 0)
+
+
+def _snow_report(d, x, bottom, snow, X, Y, halo):
+    """Snowpack row (base, +72 h with a small red "3d" range tag), then a row
+    of the coming days: forecast glyph, with the cm amount over the weekday
+    centred on it. Heavy days (≥ SNOW_HEAVY_CM) in blue. `bottom` is the
+    bottom edge, so it always sits just above the question."""
+    f_big = _font(Y(52), style="display")
+    f_lab = _font(Y(19), style="display")
+    f_amt = _font(Y(30), style="display")
+    f_tag = _font(Y(20), style="display")
+    depth, recent = _cm(snow.get("depth_cm")), _cm(snow.get("recent_cm"))
+
+    # Glyph row (bottom): glyph | amount over weekday, tight.
+    gy = bottom - Y(30)                       # glyph centre line
+    x1 = x
+    for dy in (snow.get("days") or [])[:3]:
+        cm = _cm(dy.get("snow_cm"))
+        k = datasources.icon_kind(dy.get("code"))
+        iw = _weather_icon_width(d, Y(26), k)
+        _weather_icon(d, x1 + iw // 2, gy, Y(26), k)
+        x1 += iw + X(8)
+        amt, dw = f"{cm}cm", _dow(dy.get("date")).upper()
+        # amount + label stacked, the pair's centre on the glyph's centre
+        h_amt = d.textbbox((0, 0), amt, font=f_amt)[3]
+        h_dw = d.textbbox((0, 0), dw, font=f_lab)[3]
+        gap = Y(4)
+        ty = gy - (h_amt + gap + h_dw) // 2
+        d.text((x1, ty), amt, font=f_amt,
+               fill=BLUE if cm >= SNOW_HEAVY_CM else BLACK, **halo)
+        d.text((x1, ty + h_amt + gap), dw, font=f_lab, fill=BLACK, **halo)
+        x1 += max(d.textlength(amt, font=f_amt), d.textlength(dw, font=f_lab)) + X(26)
+
+    # Snowpack row (above): big figures, a little air, then the small label.
+    y2 = gy - Y(48) - Y(98)
+    x2 = x
+    for big, tag, lab in ((str(depth), None, f"CM BASE · {round(depth / 2.54)} IN"),
+                          (f"+{recent}", "3d", f"CM · {round(recent / 2.54)} IN")):
+        d.text((x2, y2), big, font=f_big, fill=BLACK, **halo)
+        w = d.textlength(big, font=f_big)
+        if tag:
+            d.text((x2 + w + X(6), y2 + Y(4)), tag, font=f_tag, fill=RED, **halo)
+            w += X(6) + d.textlength(tag, font=f_tag)
+        d.text((x2, y2 + Y(66)), lab, font=f_lab, fill=BLACK, **halo)
+        x2 += max(w, d.textlength(lab, font=f_lab)) + X(48)
 
 
 def placeholder(width: int, height: int) -> Image.Image:

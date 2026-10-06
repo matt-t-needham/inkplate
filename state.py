@@ -35,6 +35,11 @@ DEFAULT_CONFIG = {
     # Now-playing widget (rage.bix). Off by default: at battery cadences the
     # song is stale anyway; enable on mains power with a short cadence.
     "show_now_playing": False,
+    # Snow report (seasonal): its own location, independent of the weather's.
+    "show_snow": True,
+    "snow_latitude": config.DEFAULT_SNOW_LATITUDE,
+    "snow_longitude": config.DEFAULT_SNOW_LONGITUDE,
+    "snow_location_name": config.DEFAULT_SNOW_LOCATION_NAME,
     # Sequence offsets for the pane's "next animal"/"next question" cycle
     # buttons (layout testing) — advance the deterministic pick.
     "animal_offset": 0,
@@ -44,6 +49,8 @@ DEFAULT_CONFIG = {
     # the weather wants the hourly refresh, these do not.
     "animal_period_days": 1,
     "question_period_days": 1,
+    # Common names of animals vetoed from the pane — skipped by the rotation.
+    "vetoed_animals": [],
     # Monotonic content version. The device compares this against the version
     # it stored in RTC memory to decide whether to redraw (a redraw costs ~20s
     # and visible flashing, so unchanged content must never trigger one).
@@ -109,6 +116,21 @@ def update_config(**changes) -> dict:
         cfg["longitude"] = v
     if "location_name" in changes:
         cfg["location_name"] = str(changes["location_name"])[:60]
+    if "snow_latitude" in changes:
+        v = float(changes["snow_latitude"])
+        if not -90 <= v <= 90:
+            raise ValueError("snow latitude out of range")
+        cfg["snow_latitude"] = v
+    if "snow_longitude" in changes:
+        v = float(changes["snow_longitude"])
+        if not -180 <= v <= 180:
+            raise ValueError("snow longitude out of range")
+        cfg["snow_longitude"] = v
+    if "snow_location_name" in changes:
+        cfg["snow_location_name"] = str(changes["snow_location_name"])[:60]
+    if "show_snow" in changes:
+        cfg["show_snow"] = bool(changes["show_snow"])
+
     if "show_now_playing" in changes:
         cfg["show_now_playing"] = bool(changes["show_now_playing"])
     for key in ("animal_offset", "question_offset"):
@@ -117,6 +139,11 @@ def update_config(**changes) -> dict:
     for key in ("animal_period_days", "question_period_days"):
         if key in changes:
             cfg[key] = max(1, min(365, int(changes[key])))
+    if "vetoed_animals" in changes:
+        v = changes["vetoed_animals"]
+        if not isinstance(v, list):
+            raise TypeError("vetoed_animals must be a list")
+        cfg["vetoed_animals"] = sorted({str(n)[:80] for n in v})
     save_config(cfg)
     return cfg
 

@@ -37,6 +37,12 @@ FAKE_WEATHER = {
     ],
 }
 
+FAKE_SNOW = {"depth_cm": 152.4, "recent_cm": 38.2, "days": [
+    {"date": "2026-09-17", "snow_cm": 12.0, "code": 73},
+    {"date": "2026-09-18", "snow_cm": 2.6, "code": 3},
+    {"date": "2026-09-19", "snow_cm": 18.1, "code": 75},
+]}
+
 FAKE_NOW = {"artist": "Magic Dirt", "song": "Watch Out Boys", "year": "2003",
             "channel_name": "RAGE"}
 
@@ -58,6 +64,8 @@ def fake_data(tmp_path, monkeypatch):
                    "native": "the Northern Hemisphere", "for_date": "2026-09-17"}
 
     monkeypatch.setattr(datasources, "get_weather", lambda lat, lon: FAKE_WEATHER)
-    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1: fake_animal)
+    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): fake_animal)
     monkeypatch.setattr(datasources, "get_now_playing", lambda: FAKE_NOW)
-    return {"weather": FAKE_WEATHER, "animal": fake_animal, "now": FAKE_NOW}
+    monkeypatch.setattr(datasources, "get_snow", lambda lat, lon: FAKE_SNOW)
+    return {"weather": FAKE_WEATHER, "animal": fake_animal, "now": FAKE_NOW,
+            "snow": FAKE_SNOW}

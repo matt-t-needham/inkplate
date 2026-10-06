@@ -152,6 +152,46 @@ def get_weather(latitude: float, longitude: float) -> dict | None:
                          config.WEATHER_TTL_S, fetch, "weather")
 
 
+# ── snow report (Open-Meteo, seasonal) ────────────────────────────────────────
+
+def get_snow(latitude: float, longitude: float) -> dict | None:
+    """Snowpack and snowfall at a ski area: modelled depth now, snowfall over
+    the last 72 h, and per-day snowfall + weather code for today and the next
+    two days. Open-Meteo models a grid cell, so depth is an estimate, not the
+    resort's reported base. Cached 1 h; stale-on-error like the weather."""
+    from datetime import datetime, timedelta
+
+    def fetch():
+        raw = _get_json(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": latitude, "longitude": longitude,
+                "current": "snow_depth",
+                "hourly": "snowfall",
+                "daily": "snowfall_sum,weather_code",
+                "timezone": "auto", "past_days": 3, "forecast_days": 3,
+            },
+        )
+        now = datetime.fromisoformat(raw["current"]["time"])
+        cutoff = now - timedelta(hours=72)
+        hourly = raw["hourly"]
+        recent = sum(v or 0 for t, v in zip(hourly["time"], hourly["snowfall"])
+                     if cutoff < datetime.fromisoformat(t) <= now)
+        daily = raw["daily"]
+        today = now.date().isoformat()
+        days = [{"date": t, "snow_cm": daily["snowfall_sum"][i] or 0,
+                 "code": daily["weather_code"][i]}
+                for i, t in enumerate(daily["time"]) if t >= today][:3]
+        return {
+            "depth_cm": (raw["current"]["snow_depth"] or 0) * 100,  # API gives metres
+            "recent_cm": recent,
+            "days": days,
+        }
+
+    return _cached_fetch(f"snow_{latitude:.3f}_{longitude:.3f}.json",
+                         config.SNOW_TTL_S, fetch, "snow")
+
+
 # ── daily animal print (Wikimedia Commons, several historical corpuses) ──────
 # Each day picks an animal and a starting collection (both deterministic),
 # then falls through the eligible collections until one has a usable plate.
@@ -564,8 +604,15 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int) -> dict | No
     }
 
 
+def cached_animal() -> dict | None:
+    """The engraving currently cached (i.e. the one on the panel), without
+    fetching — cheap enough for the pane's 10 s state poll."""
+    meta = _cache_read("animal.json")
+    return meta.get("data") if meta else None
+
+
 def get_animal(day: date | None = None, offset: int = 0,
-               period_days: int = 1) -> dict | None:
+               period_days: int = 1, vetoed=()) -> dict | None:
     """The current engraving, as a data dict for the caption: common/sci name,
     year, artist + artist's place (collection defaults when the file is
     silent), the animal's native range.
@@ -580,12 +627,19 @@ def get_animal(day: date | None = None, offset: int = 0,
 
     day = day or date.today()
     slot = questions.slot_for(day, period_days, offset)
+    vetoed = set(vetoed)
     meta = _cache_read("animal.json")
     if (meta and meta.get("data", {}).get("slot") == slot
+            and meta["data"].get("common_name") not in vetoed
             and (_cache_dir() / ANIMAL_IMG).exists()):
         return meta["data"]
 
-    common, latin, native, kind = ANIMALS[slot % len(ANIMALS)]
+    idx = slot % len(ANIMALS)
+    for step in range(len(ANIMALS)):
+        if ANIMALS[(idx + step) % len(ANIMALS)][0] not in vetoed:
+            idx = (idx + step) % len(ANIMALS)
+            break
+    common, latin, native, kind = ANIMALS[idx]
     eligible = [c for c in COLLECTIONS if c["kinds"] is None or kind in c["kinds"]]
     rot = slot % len(eligible)
     for coll in eligible[rot:] + eligible[:rot]:
@@ -601,8 +655,9 @@ def get_animal(day: date | None = None, offset: int = 0,
             return data
 
     _log_event(f"animal illustration fetch failed for {common} in all collections")
-    if meta and (_cache_dir() / ANIMAL_IMG).exists():
-        return meta["data"]  # yesterday's beast beats no beast
+    if (meta and (_cache_dir() / ANIMAL_IMG).exists()
+            and meta["data"].get("common_name") not in vetoed):
+        return meta["data"]  # yesterday's beast beats no beast (unless vetoed)
     return None
 
 

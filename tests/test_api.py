@@ -28,7 +28,8 @@ def test_index_served(client):
 
 def test_state_shape(client):
     st = client.get("/api/state").json()
-    assert set(st) == {"config", "screens", "render", "last_checkin", "checkins", "events"}
+    assert set(st) == {"config", "screens", "render", "last_checkin", "checkins", "events",
+                       "current"}
     assert "placeholder" in st["screens"]
     assert st["last_checkin"] is None
 
@@ -48,6 +49,10 @@ def test_config_update_and_validation(client):
     assert (cfg["latitude"], cfg["longitude"]) == (51.5, -0.12)
     assert cfg["location_name"] == "London"
     assert cfg["show_now_playing"] is True
+    r = client.post("/api/config", json={"show_snow": False,
+                                         "snow_location_name": "Timberline"})
+    assert r.status_code == 200 and r.json()["show_snow"] is False
+    assert client.post("/api/config", json={"snow_latitude": 95}).status_code == 400
 
 
 def test_render_bumps_version_and_logs_event(client):
@@ -148,3 +153,39 @@ def test_cycle_question_changes_content_and_version(client):
     r = client.post("/api/cycle", json={"what": "question"}).json()
     # different question -> different pixels -> hash-driven version bump
     assert r["render"]["image_version"] == v1 + 1
+
+
+def test_veto_question_removes_it_and_moves_on(client):
+    cur = client.get("/api/state").json()["current"]["question"]
+    r = client.post("/api/veto", json={"what": "question"})
+    assert r.status_code == 200
+    bank = client.get("/api/questions").json()
+    assert bank["customised"] is True
+    assert cur["text"] not in [q["text"] for q in bank["questions"]]
+    assert r.json()["current"]["question"]["text"] != cur["text"]
+    assert client.post("/api/veto", json={"what": "weather"}).status_code == 400
+
+
+def test_veto_and_restore_animal(client):
+    import datasources
+    assert client.post("/api/veto", json={"what": "animal"}).status_code == 409  # nothing cached
+    datasources._cache_write("animal.json", {"fetched_at": 0, "data": {"common_name": "fox"}})
+    assert client.post("/api/veto", json={"what": "animal"}).status_code == 200
+    assert state.load_config()["vetoed_animals"] == ["fox"]
+    assert client.get("/api/state").json()["current"]["vetoed_animals"] == ["fox"]
+    assert client.post("/api/unveto", json={"animal": "fox"}).status_code == 200
+    assert state.load_config()["vetoed_animals"] == []
+    assert client.post("/api/unveto", json={"animal": "fox"}).status_code == 404
+
+
+def test_question_bank_edit_and_reset(client):
+    bank = client.get("/api/questions").json()
+    qs = bank["questions"]
+    qs[bank["current_index"]]["text"] = "Rewritten from the pane?"
+    r = client.put("/api/questions", json={"questions": qs})
+    assert r.status_code == 200
+    assert client.get("/api/state").json()["current"]["question"]["text"] == "Rewritten from the pane?"
+    assert client.put("/api/questions", json={"questions": []}).status_code == 400
+    assert client.put("/api/questions", json=[1]).status_code == 400
+    r = client.delete("/api/questions")
+    assert r.json()["customised"] is False

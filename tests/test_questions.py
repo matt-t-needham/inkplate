@@ -80,3 +80,30 @@ def test_house_style_holds():
             assert b not in low, f"{b!r} in {text!r}"
         assert text.endswith(("?", ".")), text
         assert len(text) <= 150, text  # four wrapped lines on the panel
+
+
+def test_bank_defaults_to_shipped(data_dir):
+    assert questions.bank() == list(questions.BANK)
+
+
+def test_edited_bank_drives_selection(data_dir):
+    d = date(2026, 9, 17)
+    i = questions.index_for(d)
+    rows = questions.bank()
+    rows[i] = (rows[i][0], "Edited wording — still today's pick?")
+    questions.save_bank(rows)
+    # In-place edit keeps the slot's pick; only the wording changes.
+    assert questions.question_for(d)["text"] == "Edited wording — still today's pick?"
+    questions.reset_bank()
+    assert questions.bank() == list(questions.BANK)
+
+
+def test_save_bank_validates(data_dir):
+    import pytest
+    with pytest.raises(ValueError):
+        questions.save_bank([{"category": "x", "text": "   "}])
+    with pytest.raises(ValueError):
+        questions.save_bank([{"category": "x", "text": "a" * 301}])
+    saved = questions.save_bank([{"category": "", "text": "  Only  one?  "}])
+    assert saved == [("misc", "Only one?")]
+    assert questions.question_for(date(2026, 9, 17))["text"] == "Only one?"

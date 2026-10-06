@@ -55,3 +55,13 @@ def test_ndjson_cap(data_dir, monkeypatch):
     lines = (data_dir / "events.ndjson").read_text().splitlines()
     assert len(lines) <= 11  # cap/2 kept after trim, +1 for the triggering append
     assert json.loads(lines[-1])["message"] == "e24"  # newest survive
+
+
+def test_snow_config_validation(data_dir):
+    import pytest
+    import state
+    cfg = state.update_config(show_snow=False, snow_location_name="Timberline",
+                              snow_latitude=45.33, snow_longitude=-121.71)
+    assert (cfg["show_snow"], cfg["snow_location_name"]) == (False, "Timberline")
+    with pytest.raises(ValueError):
+        state.update_config(snow_latitude=95)

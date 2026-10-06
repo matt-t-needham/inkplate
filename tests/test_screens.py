@@ -21,8 +21,9 @@ def test_full_panel_resolution_render(data_dir, fake_data):
 def test_dashboard_survives_every_source_down(data_dir, monkeypatch):
     import datasources
     monkeypatch.setattr(datasources, "get_weather", lambda lat, lon: None)
-    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1: None)
+    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): None)
     monkeypatch.setattr(datasources, "get_now_playing", lambda: None)
+    monkeypatch.setattr(datasources, "get_snow", lambda lat, lon: None)
     img = screens.dashboard(1600, 1200)
     assert img.size == (1600, 1200)  # degraded, never blank/crashed
 
@@ -153,3 +154,24 @@ def test_weather_font_actually_loaded():
     f = screens._wi_font(40)
     assert isinstance(f, ImageFont.FreeTypeFont)
     assert "weathericons" in f.path.lower()
+
+
+def test_dashboard_snow_toggle_and_location(data_dir, fake_data, monkeypatch):
+    import datasources
+    import state
+    calls = []
+    monkeypatch.setattr(datasources, "get_snow",
+                        lambda lat, lon: calls.append((lat, lon)) or fake_data["snow"])
+    state.update_config(show_snow=True)
+    screens.dashboard(1600, 1200)
+    state.update_config(snow_latitude=46.0, snow_longitude=-121.5)
+    screens.dashboard(1600, 1200)
+    assert calls[-1] == (46.0, -121.5)
+    state.update_config(show_snow=False)
+    screens.dashboard(400, 300)
+    assert len(calls) == 2  # off means not even fetched
+
+
+def test_dow():
+    assert screens._dow("2026-12-16") == "Wed"
+    assert screens._dow(None) == "?"
