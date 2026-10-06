@@ -468,8 +468,8 @@ def dashboard(width: int, height: int) -> Image.Image:
 
     # ── weather, top-left, everything flush to one left edge: today's
     #    forecast glyph (what the day will do — the window shows what it's
-    #    doing now) beside the current temperature and today's high; the next
-    #    three days; sunrise/sunset underneath ───────────────────────────────
+    #    doing now) beside the current temperature and today's high; sunrise/
+    #    sunset; then the next two days ──────────────────────────────────────
     LX = X(52)
     if weather and weather.get("days"):
         today = weather["days"][0]
@@ -483,31 +483,31 @@ def dashboard(width: int, height: int) -> Image.Image:
         d.text((x, Y(62)), "HIGH", font=f_lab, fill=BLACK, **halo)
         _temp_cf(d, x, Y(92), today["tmax"], Y(64), RED, halo)
 
-        f_day = _font(Y(28), style="display")
-        for i, day in enumerate(weather["days"][1:4]):
-            cx0 = LX + i * X(256)
-            dk = datasources.icon_kind(day["code"])
-            iw = _weather_icon_width(d, Y(30), dk)
-            _weather_icon(d, cx0 + iw // 2, Y(276), Y(30), dk)
-            d.text((cx0 + iw + X(12), Y(260)), _dow(day["date"]), font=f_day,
-                   fill=BLACK, **halo)
-            # Low then high, both units.
-            lo, hi = str(round(day["tmin"])), str(round(day["tmax"]))
-            w_lo = _deg(d, cx0, Y(316), lo, Y(38), BLUE, halo=halo)
-            _deg(d, cx0 + w_lo + X(18), Y(316), hi, Y(38), RED, halo=halo)
-            d.text((cx0, Y(372)),
-                   f"{_c_to_f(day['tmin'])} / {_c_to_f(day['tmax'])} °F",
-                   font=_font(Y(22)), fill=BLACK, **halo)
-
         f_t = _font(Y(30), style="display")
         gsz = Y(60)
         gw = _glyph_width(d, WI_SUNRISE, gsz)
         x = LX
         for txt, rising in ((_hhmm(today["sunrise"]), True),
                             (_hhmm(today["sunset"]), False)):
-            _sun_horizon(d, x + gw // 2, Y(446), gsz, rising)
-            d.text((x + gw + X(10), Y(430)), txt, font=f_t, fill=BLACK, **halo)
+            _sun_horizon(d, x + gw // 2, Y(266), gsz, rising)
+            d.text((x + gw + X(10), Y(250)), txt, font=f_t, fill=BLACK, **halo)
             x += gw + X(10) + d.textlength(txt, font=f_t) + X(44)
+
+        f_day = _font(Y(28), style="display")
+        for i, day in enumerate(weather["days"][1:3]):
+            cx0 = LX + i * X(256)
+            dk = datasources.icon_kind(day["code"])
+            iw = _weather_icon_width(d, Y(30), dk)
+            _weather_icon(d, cx0 + iw // 2, Y(356), Y(30), dk)
+            d.text((cx0 + iw + X(12), Y(340)), _dow(day["date"]), font=f_day,
+                   fill=BLACK, **halo)
+            # Low then high, both units.
+            lo, hi = str(round(day["tmin"])), str(round(day["tmax"]))
+            w_lo = _deg(d, cx0, Y(396), lo, Y(38), BLUE, halo=halo)
+            _deg(d, cx0 + w_lo + X(18), Y(396), hi, Y(38), RED, halo=halo)
+            d.text((cx0, Y(452)),
+                   f"{_c_to_f(day['tmin'])} / {_c_to_f(day['tmax'])} °F",
+                   font=_font(Y(22)), fill=BLACK, **halo)
     else:
         d.text((LX, Y(100)), "weather unavailable",
                font=_font(Y(40), style="display"), fill=RED, **halo)
@@ -524,11 +524,7 @@ def dashboard(width: int, height: int) -> Image.Image:
         qy += line_h
 
     if snow:
-        if cfg["snow_style"] == "numbers":
-            _snow_numbers(d, LX, qtop - Y(24), snow, X, Y, halo)
-        else:
-            _snow_sentence(d, LX, qtop - Y(20), snow, cfg["snow_location_name"],
-                           X(1060), Y, halo)
+        _snow_report(d, LX, qtop - Y(40), snow, X, Y, halo)
 
     return img
 
@@ -571,81 +567,49 @@ def _cm(v) -> int:
     return round(v or 0)
 
 
-def snow_sentence(snow: dict, name: str) -> str:
-    """Fixed template, no prose generation:
-    "<Name>: X cm on the ground, and Y cm recently. Z cm on Wed and A cm on Thu."
-    Zero amounts read "nothing". The two forecast days are tomorrow and the
-    day after (today's snow is still falling into "recently")."""
-    depth, recent = _cm(snow.get("depth_cm")), _cm(snow.get("recent_cm"))
-    if depth and recent:
-        first = f"{depth} cm on the ground, and {recent} cm recently."
-    elif depth:
-        first = f"{depth} cm on the ground, nothing recently."
-    elif recent:
-        first = f"Nothing on the ground, but {recent} cm recently."
-    else:
-        first = "Nothing on the ground."
-    ahead = (snow.get("days") or [])[1:3]
-    parts = [(_cm(dy.get("snow_cm")), _dow(dy.get("date"))) for dy in ahead]
-    if not parts:
-        second = ""
-    elif not any(cm for cm, _ in parts):
-        second = "Nothing on " + " or ".join(dw for _, dw in parts) + "."
-    else:
-        bits = [(f"{cm} cm on {dw}" if cm else f"nothing on {dw}") for cm, dw in parts]
-        second = " and ".join(bits) + "."
-        second = second[0].upper() + second[1:]
-    text = f"{name}: {first}" if name else first
-    return f"{text} {second}".strip()
-
-
-def _snow_sentence(d, x, bottom, snow, name, max_w, Y, halo):
-    """Style C: the templated sentence in the question's serif italic, blue,
-    after a snowflake. Wraps to two lines at most; `bottom` is its baseline
-    edge so it always sits just above the question."""
-    f = _font(Y(32), style="serif_italic")
-    gs = Y(40)
-    gw = _glyph_width(d, SNOW_FLAKE, gs)
-    lines = _wrap(d, snow_sentence(snow, name), f, max_w - gw - Y(14))[:2]
-    lh = Y(42)
-    y = bottom - lh * len(lines)
-    _glyph(d, x + gw // 2, y + Y(18), gs, SNOW_FLAKE, BLUE)
-    for ln in lines:
-        d.text((x + gw + Y(14), y), ln, font=f, fill=BLUE, **halo)
-        y += lh
-
-
-def _snow_numbers(d, x, bottom, snow, X, Y, halo):
-    """Style D: upcoming days on top (forecast glyph, cm, day), the snowpack
-    and 72 h figures large underneath. Heavy days (≥ SNOW_HEAVY_CM) in blue."""
-    f_amt = _font(Y(32), style="display")
-    f_lab = _font(Y(19), style="display")
+def _snow_report(d, x, bottom, snow, X, Y, halo):
+    """Snowpack row (base, +72 h with a small red "3d" range tag), then a row
+    of the coming days: forecast glyph, with the cm amount over the weekday
+    centred on it. Heavy days (≥ SNOW_HEAVY_CM) in blue. `bottom` is the
+    bottom edge, so it always sits just above the question."""
     f_big = _font(Y(52), style="display")
-    # bottom row: big figures
-    y2 = bottom - Y(80)
-    x2 = x
-    for big, lab in ((f"{_cm(snow.get('depth_cm'))}",
-                      f"CM BASE · {round(_cm(snow.get('depth_cm')) / 2.54)} IN"),
-                     (f"+{_cm(snow.get('recent_cm'))}",
-                      f"CM 72 H · {round(_cm(snow.get('recent_cm')) / 2.54)} IN")):
-        d.text((x2, y2), big, font=f_big, fill=BLACK, **halo)
-        d.text((x2, y2 + Y(58)), lab, font=f_lab, fill=BLACK, **halo)
-        x2 += max(d.textlength(big, font=f_big), d.textlength(lab, font=f_lab)) + X(48)
-    # top row: the next days
-    y1 = y2 - Y(66)
+    f_lab = _font(Y(19), style="display")
+    f_amt = _font(Y(30), style="display")
+    f_tag = _font(Y(20), style="display")
+    depth, recent = _cm(snow.get("depth_cm")), _cm(snow.get("recent_cm"))
+
+    # Glyph row (bottom): glyph | amount over weekday, tight.
+    gy = bottom - Y(30)                       # glyph centre line
     x1 = x
     for dy in (snow.get("days") or [])[:3]:
         cm = _cm(dy.get("snow_cm"))
         k = datasources.icon_kind(dy.get("code"))
         iw = _weather_icon_width(d, Y(26), k)
-        _weather_icon(d, x1 + iw // 2, y1 + Y(20), Y(26), k)
-        x1 += iw + X(10)
-        amt = f"{cm}cm"
-        d.text((x1, y1), amt, font=f_amt, fill=BLUE if cm >= SNOW_HEAVY_CM else BLACK, **halo)
-        x1 += d.textlength(amt, font=f_amt) + X(8)
-        dw = _dow(dy.get("date")).upper()
-        d.text((x1, y1 + Y(10)), dw, font=f_lab, fill=BLACK, **halo)
-        x1 += d.textlength(dw, font=f_lab) + X(36)
+        _weather_icon(d, x1 + iw // 2, gy, Y(26), k)
+        x1 += iw + X(8)
+        amt, dw = f"{cm}cm", _dow(dy.get("date")).upper()
+        # amount + label stacked, the pair's centre on the glyph's centre
+        h_amt = d.textbbox((0, 0), amt, font=f_amt)[3]
+        h_dw = d.textbbox((0, 0), dw, font=f_lab)[3]
+        gap = Y(4)
+        ty = gy - (h_amt + gap + h_dw) // 2
+        d.text((x1, ty), amt, font=f_amt,
+               fill=BLUE if cm >= SNOW_HEAVY_CM else BLACK, **halo)
+        d.text((x1, ty + h_amt + gap), dw, font=f_lab, fill=BLACK, **halo)
+        x1 += max(d.textlength(amt, font=f_amt), d.textlength(dw, font=f_lab)) + X(26)
+
+    # Snowpack row (above): big figures, a little air, then the small label.
+    y2 = gy - Y(48) - Y(98)
+    x2 = x
+    for big, tag, lab in ((str(depth), None, f"CM BASE · {round(depth / 2.54)} IN"),
+                          (f"+{recent}", "3d", f"CM · {round(recent / 2.54)} IN")):
+        d.text((x2, y2), big, font=f_big, fill=BLACK, **halo)
+        w = d.textlength(big, font=f_big)
+        if tag:
+            d.text((x2 + w + X(6), y2 + Y(4)), tag, font=f_tag, fill=RED, **halo)
+            w += X(6) + d.textlength(tag, font=f_tag)
+        d.text((x2, y2 + Y(66)), lab, font=f_lab, fill=BLACK, **halo)
+        x2 += max(w, d.textlength(lab, font=f_lab)) + X(48)
 
 
 def placeholder(width: int, height: int) -> Image.Image:

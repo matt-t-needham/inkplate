@@ -118,8 +118,7 @@ def icon_kind(wmo_code) -> str:
 
 
 def get_weather(latitude: float, longitude: float) -> dict | None:
-    """Current temp + 4 daily entries (today first, then the three the
-    dashboard's forecast row shows). Cached 30 min."""
+    """Current temp + 3 daily entries (today first). Cached 30 min."""
     def fetch():
         raw = _get_json(
             "https://api.open-meteo.com/v1/forecast",
@@ -127,7 +126,7 @@ def get_weather(latitude: float, longitude: float) -> dict | None:
                 "latitude": latitude, "longitude": longitude,
                 "current": "temperature_2m,weather_code",
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset",
-                "timezone": "auto", "forecast_days": 4,
+                "timezone": "auto", "forecast_days": 3,
             },
         )
         daily = raw["daily"]

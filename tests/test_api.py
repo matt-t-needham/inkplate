@@ -49,10 +49,10 @@ def test_config_update_and_validation(client):
     assert (cfg["latitude"], cfg["longitude"]) == (51.5, -0.12)
     assert cfg["location_name"] == "London"
     assert cfg["show_now_playing"] is True
-    r = client.post("/api/config", json={"show_snow": False, "snow_style": "numbers",
+    r = client.post("/api/config", json={"show_snow": False,
                                          "snow_location_name": "Timberline"})
     assert r.status_code == 200 and r.json()["show_snow"] is False
-    assert client.post("/api/config", json={"snow_style": "haiku"}).status_code == 400
+    assert client.post("/api/config", json={"snow_latitude": 95}).status_code == 400
 
 
 def test_render_bumps_version_and_logs_event(client):

@@ -156,34 +156,15 @@ def test_weather_font_actually_loaded():
     assert "weathericons" in f.path.lower()
 
 
-def test_snow_sentence_template():
-    snow = {"depth_cm": 152.4, "recent_cm": 38.2, "days": [
-        {"date": "2026-12-15", "snow_cm": 4}, {"date": "2026-12-16", "snow_cm": 12.4},
-        {"date": "2026-12-17", "snow_cm": 3}]}
-    assert screens.snow_sentence(snow, "Meadows") == (
-        "Meadows: 152 cm on the ground, and 38 cm recently. 12 cm on Wed and 3 cm on Thu.")
-
-
-def test_snow_sentence_nothing():
-    snow = {"depth_cm": 0, "recent_cm": 0.2, "days": [
-        {"date": "2026-10-05", "snow_cm": 0}, {"date": "2026-10-06", "snow_cm": 0},
-        {"date": "2026-10-07", "snow_cm": None}]}
-    assert screens.snow_sentence(snow, "Meadows") == (
-        "Meadows: Nothing on the ground. Nothing on Tue or Wed.")
-    snow["days"][2]["snow_cm"] = 7
-    assert screens.snow_sentence(snow, "") == (
-        "Nothing on the ground. Nothing on Tue and 7 cm on Wed.")
-
-
-def test_dashboard_snow_styles_and_toggle(data_dir, fake_data, monkeypatch):
+def test_dashboard_snow_toggle_and_location(data_dir, fake_data, monkeypatch):
     import datasources
     import state
     calls = []
     monkeypatch.setattr(datasources, "get_snow",
                         lambda lat, lon: calls.append((lat, lon)) or fake_data["snow"])
-    state.update_config(show_snow=True, snow_style="numbers")
+    state.update_config(show_snow=True)
     screens.dashboard(1600, 1200)
-    state.update_config(snow_style="sentence", snow_latitude=46.0, snow_longitude=-121.5)
+    state.update_config(snow_latitude=46.0, snow_longitude=-121.5)
     screens.dashboard(1600, 1200)
     assert calls[-1] == (46.0, -121.5)
     state.update_config(show_snow=False)

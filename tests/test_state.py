@@ -61,11 +61,7 @@ def test_snow_config_validation(data_dir):
     import pytest
     import state
     cfg = state.update_config(show_snow=False, snow_location_name="Timberline",
-                              snow_latitude=45.33, snow_longitude=-121.71,
-                              snow_style="numbers")
-    assert (cfg["show_snow"], cfg["snow_location_name"], cfg["snow_style"]) == \
-        (False, "Timberline", "numbers")
-    with pytest.raises(ValueError):
-        state.update_config(snow_style="haiku")
+                              snow_latitude=45.33, snow_longitude=-121.71)
+    assert (cfg["show_snow"], cfg["snow_location_name"]) == (False, "Timberline")
     with pytest.raises(ValueError):
         state.update_config(snow_latitude=95)
