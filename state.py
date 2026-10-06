@@ -35,6 +35,13 @@ DEFAULT_CONFIG = {
     # Now-playing widget (rage.bix). Off by default: at battery cadences the
     # song is stale anyway; enable on mains power with a short cadence.
     "show_now_playing": False,
+    # Snow report (seasonal): its own location, independent of the weather's.
+    # snow_style: "sentence" (one templated line) or "numbers" (big figures).
+    "show_snow": True,
+    "snow_latitude": config.DEFAULT_SNOW_LATITUDE,
+    "snow_longitude": config.DEFAULT_SNOW_LONGITUDE,
+    "snow_location_name": config.DEFAULT_SNOW_LOCATION_NAME,
+    "snow_style": "sentence",
     # Sequence offsets for the pane's "next animal"/"next question" cycle
     # buttons (layout testing) — advance the deterministic pick.
     "animal_offset": 0,
@@ -111,6 +118,24 @@ def update_config(**changes) -> dict:
         cfg["longitude"] = v
     if "location_name" in changes:
         cfg["location_name"] = str(changes["location_name"])[:60]
+    if "snow_latitude" in changes:
+        v = float(changes["snow_latitude"])
+        if not -90 <= v <= 90:
+            raise ValueError("snow latitude out of range")
+        cfg["snow_latitude"] = v
+    if "snow_longitude" in changes:
+        v = float(changes["snow_longitude"])
+        if not -180 <= v <= 180:
+            raise ValueError("snow longitude out of range")
+        cfg["snow_longitude"] = v
+    if "snow_location_name" in changes:
+        cfg["snow_location_name"] = str(changes["snow_location_name"])[:60]
+    if "show_snow" in changes:
+        cfg["show_snow"] = bool(changes["show_snow"])
+    if "snow_style" in changes:
+        if changes["snow_style"] not in ("sentence", "numbers"):
+            raise ValueError("snow_style must be sentence|numbers")
+        cfg["snow_style"] = changes["snow_style"]
     if "show_now_playing" in changes:
         cfg["show_now_playing"] = bool(changes["show_now_playing"])
     for key in ("animal_offset", "question_offset"):

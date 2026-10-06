@@ -210,10 +210,15 @@
       <div class="field"><label for="f-question-period" title="How often a new talking point is chosen.">Question cadence (days)</label><input id="f-question-period" type="number" min="1" max="365"></div>
       <div class="field"><label for="f-tethered">Tethered mode (no deep sleep)</label><input id="f-tethered" type="checkbox"></div>
       <div class="field"><label for="f-poll">Tethered poll (sec)</label><input id="f-poll" type="number" min="5" max="600"></div>
-      <div class="field"><label for="f-location">Location name</label><input id="f-location" type="text" maxlength="60" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:6px 8px;font:inherit"></div>
+      <div class="field"><label for="f-location">Weather location</label><input id="f-location" type="text" maxlength="60" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:6px 8px;font:inherit"></div>
       <div class="field"><label for="f-lat">Latitude</label><input id="f-lat" type="number" step="0.0001" min="-90" max="90"></div>
       <div class="field"><label for="f-lon">Longitude</label><input id="f-lon" type="number" step="0.0001" min="-180" max="180"></div>
       <div class="field"><label for="f-nowplaying" title="Draws the current RAGE track. Only sensible on mains power with a short cadence — the device still only redraws when pixels change.">Now playing (rage.bix)</label><input id="f-nowplaying" type="checkbox"></div>
+      <div class="field" style="margin-top:16px"><label for="f-snow" title="Seasonal: turn off when the lifts close — the line disappears and nothing is fetched.">Snow report</label><input id="f-snow" type="checkbox"></div>
+      <div class="field"><label for="f-snow-name">Snow location</label><input id="f-snow-name" type="text" maxlength="60" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:6px 8px;font:inherit"></div>
+      <div class="field"><label for="f-snow-lat">Snow latitude</label><input id="f-snow-lat" type="number" step="0.0001" min="-90" max="90"></div>
+      <div class="field"><label for="f-snow-lon">Snow longitude</label><input id="f-snow-lon" type="number" step="0.0001" min="-180" max="180"></div>
+      <div class="field"><label for="f-snow-style">Snow style</label><select id="f-snow-style"><option value="sentence">sentence</option><option value="numbers">big numbers</option></select></div>
       <div style="display:flex;align-items:center">
         <button class="primary" id="btn-save">Save</button><span id="save-msg"></span>
       </div>
@@ -311,6 +316,11 @@ $('btn-save').addEventListener('click', async () => {
         latitude: parseFloat($('f-lat').value),
         longitude: parseFloat($('f-lon').value),
         show_now_playing: $('f-nowplaying').checked,
+        show_snow: $('f-snow').checked,
+        snow_location_name: $('f-snow-name').value,
+        snow_latitude: parseFloat($('f-snow-lat').value),
+        snow_longitude: parseFloat($('f-snow-lon').value),
+        snow_style: $('f-snow-style').value,
       }),
     });
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
@@ -472,6 +482,11 @@ function renderState(st) {
   if (focused !== 'f-lat') $('f-lat').value = st.config.latitude;
   if (focused !== 'f-lon') $('f-lon').value = st.config.longitude;
   $('f-nowplaying').checked = st.config.show_now_playing;
+  $('f-snow').checked = st.config.show_snow;
+  if (focused !== 'f-snow-name') $('f-snow-name').value = st.config.snow_location_name;
+  if (focused !== 'f-snow-lat') $('f-snow-lat').value = st.config.snow_latitude;
+  if (focused !== 'f-snow-lon') $('f-snow-lon').value = st.config.snow_longitude;
+  if (focused !== 'f-snow-style') $('f-snow-style').value = st.config.snow_style;
 
   // device stats
   const last = st.last_checkin;

@@ -463,3 +463,32 @@ def test_absent_artist_still_uses_the_collection(data_dir, no_network, monkeypat
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
     monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
     assert datasources.get_animal(day)["artist"] == "John Gould"
+
+
+SNOW_RAW = {
+    "current": {"time": "2026-12-15T10:00", "snow_depth": 1.524},
+    "hourly": {
+        # 4 days of hourly data from 2026-12-12T00:00; 1 cm every hour.
+        "time": [f"2026-12-{12 + h // 24:02d}T{h % 24:02d}:00" for h in range(96)],
+        "snowfall": [1.0] * 96,
+    },
+    "daily": {
+        "time": ["2026-12-12", "2026-12-13", "2026-12-14", "2026-12-15",
+                 "2026-12-16", "2026-12-17"],
+        "snowfall_sum": [0, 0, 0, 12.0, None, 18.5],
+        "weather_code": [3, 3, 3, 73, 3, 75],
+    },
+}
+
+
+def test_snow_parse(data_dir, no_network, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(datasources, "_get_json",
+                        lambda url, params=None, **k: seen.update(params) or SNOW_RAW)
+    s = datasources.get_snow(45.33, -121.66)
+    assert seen["past_days"] == 3
+    assert round(s["depth_cm"], 1) == 152.4      # metres -> cm
+    assert s["recent_cm"] == 72                  # the 72 hours ending now
+    assert [d["date"] for d in s["days"]] == ["2026-12-15", "2026-12-16", "2026-12-17"]
+    assert s["days"][1]["snow_cm"] == 0          # null -> 0
+    assert s["days"][2]["code"] == 75

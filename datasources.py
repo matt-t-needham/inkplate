@@ -118,7 +118,8 @@ def icon_kind(wmo_code) -> str:
 
 
 def get_weather(latitude: float, longitude: float) -> dict | None:
-    """Current temp + 3 daily entries (today first). Cached 30 min."""
+    """Current temp + 4 daily entries (today first, then the three the
+    dashboard's forecast row shows). Cached 30 min."""
     def fetch():
         raw = _get_json(
             "https://api.open-meteo.com/v1/forecast",
@@ -126,7 +127,7 @@ def get_weather(latitude: float, longitude: float) -> dict | None:
                 "latitude": latitude, "longitude": longitude,
                 "current": "temperature_2m,weather_code",
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset",
-                "timezone": "auto", "forecast_days": 3,
+                "timezone": "auto", "forecast_days": 4,
             },
         )
         daily = raw["daily"]
@@ -150,6 +151,46 @@ def get_weather(latitude: float, longitude: float) -> dict | None:
     # takes effect at the next render, not after the old TTL expires.
     return _cached_fetch(f"weather_{latitude:.3f}_{longitude:.3f}.json",
                          config.WEATHER_TTL_S, fetch, "weather")
+
+
+# ── snow report (Open-Meteo, seasonal) ────────────────────────────────────────
+
+def get_snow(latitude: float, longitude: float) -> dict | None:
+    """Snowpack and snowfall at a ski area: modelled depth now, snowfall over
+    the last 72 h, and per-day snowfall + weather code for today and the next
+    two days. Open-Meteo models a grid cell, so depth is an estimate, not the
+    resort's reported base. Cached 1 h; stale-on-error like the weather."""
+    from datetime import datetime, timedelta
+
+    def fetch():
+        raw = _get_json(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": latitude, "longitude": longitude,
+                "current": "snow_depth",
+                "hourly": "snowfall",
+                "daily": "snowfall_sum,weather_code",
+                "timezone": "auto", "past_days": 3, "forecast_days": 3,
+            },
+        )
+        now = datetime.fromisoformat(raw["current"]["time"])
+        cutoff = now - timedelta(hours=72)
+        hourly = raw["hourly"]
+        recent = sum(v or 0 for t, v in zip(hourly["time"], hourly["snowfall"])
+                     if cutoff < datetime.fromisoformat(t) <= now)
+        daily = raw["daily"]
+        today = now.date().isoformat()
+        days = [{"date": t, "snow_cm": daily["snowfall_sum"][i] or 0,
+                 "code": daily["weather_code"][i]}
+                for i, t in enumerate(daily["time"]) if t >= today][:3]
+        return {
+            "depth_cm": (raw["current"]["snow_depth"] or 0) * 100,  # API gives metres
+            "recent_cm": recent,
+            "days": days,
+        }
+
+    return _cached_fetch(f"snow_{latitude:.3f}_{longitude:.3f}.json",
+                         config.SNOW_TTL_S, fetch, "snow")
 
 
 # ── daily animal print (Wikimedia Commons, several historical corpuses) ──────

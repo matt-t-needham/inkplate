@@ -112,7 +112,9 @@ async def api_config(request: Request):
     body = await request.json()
     allowed = {"refresh_minutes", "screen", "tethered", "tethered_poll_seconds",
                "latitude", "longitude", "location_name", "show_now_playing",
-               "animal_period_days", "question_period_days"}
+               "animal_period_days", "question_period_days",
+               "show_snow", "snow_latitude", "snow_longitude", "snow_location_name",
+               "snow_style"}
     changes = {k: v for k, v in body.items() if k in allowed}
     if not changes:
         raise HTTPException(400, "no recognized config keys")
