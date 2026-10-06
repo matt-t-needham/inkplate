@@ -564,8 +564,15 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int) -> dict | No
     }
 
 
+def cached_animal() -> dict | None:
+    """The engraving currently cached (i.e. the one on the panel), without
+    fetching — cheap enough for the pane's 10 s state poll."""
+    meta = _cache_read("animal.json")
+    return meta.get("data") if meta else None
+
+
 def get_animal(day: date | None = None, offset: int = 0,
-               period_days: int = 1) -> dict | None:
+               period_days: int = 1, vetoed=()) -> dict | None:
     """The current engraving, as a data dict for the caption: common/sci name,
     year, artist + artist's place (collection defaults when the file is
     silent), the animal's native range.
@@ -580,12 +587,19 @@ def get_animal(day: date | None = None, offset: int = 0,
 
     day = day or date.today()
     slot = questions.slot_for(day, period_days, offset)
+    vetoed = set(vetoed)
     meta = _cache_read("animal.json")
     if (meta and meta.get("data", {}).get("slot") == slot
+            and meta["data"].get("common_name") not in vetoed
             and (_cache_dir() / ANIMAL_IMG).exists()):
         return meta["data"]
 
-    common, latin, native, kind = ANIMALS[slot % len(ANIMALS)]
+    idx = slot % len(ANIMALS)
+    for step in range(len(ANIMALS)):
+        if ANIMALS[(idx + step) % len(ANIMALS)][0] not in vetoed:
+            idx = (idx + step) % len(ANIMALS)
+            break
+    common, latin, native, kind = ANIMALS[idx]
     eligible = [c for c in COLLECTIONS if c["kinds"] is None or kind in c["kinds"]]
     rot = slot % len(eligible)
     for coll in eligible[rot:] + eligible[:rot]:
@@ -601,8 +615,9 @@ def get_animal(day: date | None = None, offset: int = 0,
             return data
 
     _log_event(f"animal illustration fetch failed for {common} in all collections")
-    if meta and (_cache_dir() / ANIMAL_IMG).exists():
-        return meta["data"]  # yesterday's beast beats no beast
+    if (meta and (_cache_dir() / ANIMAL_IMG).exists()
+            and meta["data"].get("common_name") not in vetoed):
+        return meta["data"]  # yesterday's beast beats no beast (unless vetoed)
     return None
 
 

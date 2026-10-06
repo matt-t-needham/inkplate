@@ -44,6 +44,8 @@ DEFAULT_CONFIG = {
     # the weather wants the hourly refresh, these do not.
     "animal_period_days": 1,
     "question_period_days": 1,
+    # Common names of animals vetoed from the pane — skipped by the rotation.
+    "vetoed_animals": [],
     # Monotonic content version. The device compares this against the version
     # it stored in RTC memory to decide whether to redraw (a redraw costs ~20s
     # and visible flashing, so unchanged content must never trigger one).
@@ -117,6 +119,11 @@ def update_config(**changes) -> dict:
     for key in ("animal_period_days", "question_period_days"):
         if key in changes:
             cfg[key] = max(1, min(365, int(changes[key])))
+    if "vetoed_animals" in changes:
+        v = changes["vetoed_animals"]
+        if not isinstance(v, list):
+            raise TypeError("vetoed_animals must be a list")
+        cfg["vetoed_animals"] = sorted({str(n)[:80] for n in v})
     save_config(cfg)
     return cfg
 

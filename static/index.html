@@ -93,6 +93,37 @@
   td { padding:4px 6px; border-top:1px solid var(--surface1); font-variant-numeric:tabular-nums; }
   .empty { color:var(--subtext); font-size:13px; padding:6px 0; }
 
+  /* Now showing + question bank */
+  .now-row { margin-bottom:14px; }
+  .now-row .k { color:var(--subtext); font-size:11px; margin-bottom:4px; }
+  .now-row .v { font-weight:600; }
+  .now-row .sub { color:var(--subtext); font-size:12px; }
+  .btn-row { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+  button.danger {
+    background:none; border:1px solid var(--red); color:var(--red);
+    border-radius:7px; padding:5px 12px; font:inherit; cursor:pointer;
+  }
+  button.danger:disabled, button.ghost:disabled { opacity:.5; cursor:default; }
+  textarea, .qcat {
+    background:var(--bg); color:var(--text); border:1px solid var(--surface1);
+    border-radius:6px; padding:6px 8px; font:inherit; width:100%;
+  }
+  textarea { resize:vertical; min-height:58px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .chip {
+    background:var(--bg); border:1px solid var(--surface1); border-radius:12px;
+    padding:1px 4px 1px 10px; font-size:12px; display:flex; align-items:center; gap:4px;
+  }
+  .chip button { background:none; border:none; color:var(--subtext); cursor:pointer; font:inherit; }
+  details summary { cursor:pointer; color:var(--subtext); font-size:11px; letter-spacing:.08em;
+    text-transform:uppercase; font-weight:600; }
+  #bank-list { display:flex; flex-direction:column; gap:8px; max-height:560px; overflow-y:auto; margin-top:12px; }
+  .qrow { display:grid; grid-template-columns:110px 1fr auto; gap:8px; align-items:start;
+    padding:6px; border-radius:7px; }
+  .qrow.current { background:var(--surface1); }
+  .qrow textarea { min-height:44px; }
+  .msg { font-size:12px; } .msg.ok { color:var(--green); } .msg.err { color:var(--red); }
+
   /* Event log */
   #events { display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto; }
   .evt { display:flex; gap:8px; font-size:12px; align-items:baseline; }
@@ -106,14 +137,11 @@
 <header>
   <h1>inkplate<em>_</em>dash</h1>
   <div class="dev-badge"><span class="dot" id="dev-dot"></span><span id="dev-status">loading…</span></div>
-  <div class="spacer"></div>
-  <div class="dev-badge" id="clock"></div>
 </header>
 
 <main>
   <div class="col">
     <div class="card">
-      <h2>Preview — what the panel will show</h2>
       <img id="preview-img" alt="dashboard preview">
       <div class="preview-bar">
         <div class="seg" id="mode-seg">
@@ -138,9 +166,42 @@
       </table>
       <div class="empty" id="checkin-empty" hidden>No check-ins yet — the device hasn't phoned home. Expected until it arrives and is flashed.</div>
     </div>
+
+    <div class="card">
+      <details id="bank-details">
+        <summary>Question bank <span id="bank-count"></span></summary>
+        <div class="btn-row">
+          <button class="primary" id="btn-bank-save">Save bank</button>
+          <button class="ghost" id="btn-bank-add">Add question</button>
+          <button class="ghost" id="btn-bank-reset">Reset to defaults</button>
+          <span class="msg" id="bank-msg"></span>
+        </div>
+        <div id="bank-list"></div>
+      </details>
+    </div>
   </div>
 
   <div class="col">
+    <div class="card">
+      <h2>Now showing</h2>
+      <div class="now-row">
+        <div class="k">Animal</div>
+        <div class="v" id="now-animal">—</div>
+        <div class="sub" id="now-animal-sub"></div>
+        <div class="btn-row"><button class="danger" id="btn-veto-animal">Veto animal</button></div>
+        <div class="chips" id="vetoed-animals"></div>
+      </div>
+      <div class="now-row" style="margin-bottom:0">
+        <div class="k">Question <span id="now-q-cat"></span></div>
+        <textarea id="now-q" maxlength="300"></textarea>
+        <div class="btn-row">
+          <button class="ghost" id="btn-save-q">Save edit</button>
+          <button class="danger" id="btn-veto-q">Veto question</button>
+          <span class="msg" id="now-msg"></span>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h2>Configuration</h2>
       <div class="field"><label for="f-screen">Screen</label><select id="f-screen"></select></div>
@@ -262,6 +323,116 @@ $('btn-save').addEventListener('click', async () => {
   setTimeout(() => { msg.textContent = ''; }, 3000);
 });
 
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+function flash(el, text, ok) {
+  el.textContent = text; el.className = 'msg ' + (ok ? 'ok' : 'err');
+  setTimeout(() => { el.textContent = ''; }, 3000);
+}
+async function api(method, url, body) {
+  const r = await fetch(url, {method, headers:{'Content-Type':'application/json'},
+                              body: body === undefined ? undefined : JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || r.status);
+  return j;
+}
+
+// ── Now showing: veto + edit ──
+let nowQDirty = false;
+$('now-q').addEventListener('input', () => { nowQDirty = true; });
+
+function renderNow(cur) {
+  if (!cur) return;
+  const a = cur.animal;
+  $('now-animal').textContent = a ? a.common_name : 'none cached yet';
+  $('now-animal-sub').textContent = a ? [a.sci_name, a.year, a.artist].filter(Boolean).join(' · ') : '';
+  $('btn-veto-animal').disabled = !a;
+  $('vetoed-animals').innerHTML = (cur.vetoed_animals || []).map(n =>
+    `<span class="chip" title="vetoed">${esc(n)}<button data-restore="${esc(n)}" title="restore">✕</button></span>`).join('');
+  $('now-q-cat').textContent = '· ' + cur.question.category;
+  if (!nowQDirty && document.activeElement !== $('now-q')) {
+    $('now-q').value = cur.question.text;
+    $('now-q').dataset.index = cur.question.index;
+  }
+}
+
+$('vetoed-animals').addEventListener('click', async e => {
+  const name = e.target.dataset && e.target.dataset.restore; if (!name) return;
+  try { await api('POST', 'api/unveto', {animal: name}); await loadState(); }
+  catch (err) { alert('Restore failed: ' + err.message); }
+});
+
+async function veto(what, btn) {
+  if (!confirm(what === 'animal'
+      ? 'Veto this animal? It will be skipped from now on (restorable below).'
+      : 'Veto this question? It is deleted from the bank.')) return;
+  btn.disabled = true;
+  try {
+    await api('POST', 'api/veto', {what});
+    nowQDirty = false;
+    await loadState(); refreshPreviewImg(); bankLoaded && loadBank();
+  } catch (e) { alert('Veto failed: ' + e.message); }
+  finally { btn.disabled = false; }
+}
+$('btn-veto-animal').addEventListener('click', e => veto('animal', e.target));
+$('btn-veto-q').addEventListener('click', e => veto('question', e.target));
+
+$('btn-save-q').addEventListener('click', async () => {
+  const msg = $('now-msg');
+  try {
+    const b = await api('GET', 'api/questions');
+    const i = parseInt($('now-q').dataset.index, 10);
+    if (!(i >= 0 && i < b.questions.length)) throw new Error('bank changed — reload');
+    b.questions[i].text = $('now-q').value;
+    await api('PUT', 'api/questions', {questions: b.questions});
+    nowQDirty = false;
+    flash(msg, 'saved', true);
+    await loadState(); refreshPreviewImg(); bankLoaded && loadBank();
+  } catch (e) { flash(msg, 'failed: ' + e.message, false); }
+});
+
+// ── Question bank editor (loaded on first open) ──
+let bankLoaded = false;
+function bankRow(q, current) {
+  return `<div class="qrow${current ? ' current' : ''}">
+    <input class="qcat" value="${esc(q.category)}" maxlength="40">
+    <textarea maxlength="300">${esc(q.text)}</textarea>
+    <button class="ghost" data-del title="delete">✕</button>
+  </div>`;
+}
+async function loadBank() {
+  const b = await api('GET', 'api/questions');
+  bankLoaded = true;
+  $('bank-count').textContent = `(${b.questions.length}${b.customised ? ', edited' : ''})`;
+  $('bank-list').innerHTML = b.questions.map((q, i) => bankRow(q, i === b.current_index)).join('');
+}
+$('bank-details').addEventListener('toggle', () => { if ($('bank-details').open && !bankLoaded) loadBank(); });
+$('bank-list').addEventListener('click', e => {
+  if (e.target.matches('[data-del]')) e.target.closest('.qrow').remove();
+});
+$('btn-bank-add').addEventListener('click', () => {
+  $('bank-list').insertAdjacentHTML('afterbegin', bankRow({category:'personal', text:''}, false));
+  $('bank-list').querySelector('textarea').focus();
+});
+$('btn-bank-save').addEventListener('click', async () => {
+  const rows = [...document.querySelectorAll('#bank-list .qrow')].map(r => ({
+    category: r.querySelector('.qcat').value, text: r.querySelector('textarea').value}));
+  try {
+    await api('PUT', 'api/questions', {questions: rows});
+    flash($('bank-msg'), 'saved', true);
+    nowQDirty = false;
+    await loadBank(); await loadState(); refreshPreviewImg();
+  } catch (e) { flash($('bank-msg'), 'failed: ' + e.message, false); }
+});
+$('btn-bank-reset').addEventListener('click', async () => {
+  if (!confirm('Discard all edits and vetoes and restore the shipped question bank?')) return;
+  try {
+    await api('DELETE', 'api/questions');
+    flash($('bank-msg'), 'reset', true);
+    nowQDirty = false;
+    await loadBank(); await loadState(); refreshPreviewImg();
+  } catch (e) { flash($('bank-msg'), 'failed: ' + e.message, false); }
+});
+
 function renderDeviceBadge(st) {
   const dot = $('dev-dot'), label = $('dev-status');
   const last = st.last_checkin;
@@ -276,6 +447,7 @@ function renderDeviceBadge(st) {
 function renderState(st) {
   stateCache = st;
   renderDeviceBadge(st);
+  renderNow(st.current);
 
   // render meta
   const m = st.render;
@@ -353,7 +525,6 @@ async function loadState() {
   }
 }
 
-setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
 setInterval(loadState, 10000);
 loadState().then(refreshPreviewImg);
 </script>

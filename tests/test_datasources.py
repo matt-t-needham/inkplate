@@ -312,6 +312,24 @@ def test_animal_offset_changes_slot(data_dir, no_network, monkeypatch):
     assert b["slot"] == a["slot"] + 1
 
 
+def test_vetoed_animal_is_skipped_even_when_cached(data_dir, no_network, monkeypatch):
+    import questions
+    day = date(2026, 9, 17)
+    fox = ("fox", "Vulpes", "the Northern Hemisphere", "mammal")
+    red = ("red fox", "Vulpes vulpes", "Eurasia", "mammal")
+    # Order the list so today's slot lands on "fox".
+    animals = [fox, red] if questions.slot_for(day) % 2 == 0 else [red, fox]
+    monkeypatch.setattr(datasources, "ANIMALS", animals)
+    monkeypatch.setattr(datasources, "COLLECTIONS", [datasources.COLLECTIONS[0]])
+    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: COMMONS_RAW)
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+
+    assert datasources.get_animal(day)["common_name"] == "fox"
+    # Same slot, already cached — the veto must still force the next survivor.
+    assert datasources.get_animal(day, vetoed=["fox"])["common_name"] == "red fox"
+    assert datasources.cached_animal()["common_name"] == "red fox"
+
+
 def test_icon_kind_covers_the_richer_glyph_set():
     assert datasources.icon_kind(51) == "drizzle"
     assert datasources.icon_kind(56) == "sleet"     # freezing drizzle

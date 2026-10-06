@@ -13,6 +13,7 @@ import asyncio
 import logging
 import logging.handlers
 import os
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -34,6 +35,8 @@ try:
 except OSError as e:
     log.warning("file logging unavailable: %s", e)
 
+import datasources  # noqa: E402
+import questions  # noqa: E402
 import renderer  # noqa: E402
 import screens  # noqa: E402
 import state  # noqa: E402
@@ -77,7 +80,31 @@ async def api_state():
         "last_checkin": checkins[0] if checkins else None,
         "checkins": checkins,
         "events": state.read_events(limit=50),
+        "current": _current(cfg),
     }
+
+
+def _current(cfg: dict) -> dict:
+    """What the dashboard is showing right now — for the pane's veto/edit card.
+    The animal comes from the fetch cache (no network on the 10 s poll)."""
+    a = datasources.cached_animal()
+    i = questions.index_for(date.today(), cfg["question_offset"], cfg["question_period_days"])
+    cat, text = questions.bank()[i]
+    return {
+        "animal": {k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
+                                          "collection")} if a else None,
+        "question": {"index": i, "category": cat, "text": text},
+        "vetoed_animals": cfg["vetoed_animals"],
+    }
+
+
+async def _rerender(why: str) -> dict:
+    async with _render_lock:
+        try:
+            return await asyncio.to_thread(renderer.render)
+        except Exception as e:
+            log.error("%s render failed: %s", why, e, exc_info=True)
+            raise HTTPException(500, f"render failed: {e}")
 
 
 @app.post("/api/config")
@@ -123,13 +150,95 @@ async def api_cycle(request: Request):
     cfg = state.load_config()
     cfg = await asyncio.to_thread(state.update_config, **{key: cfg[key] + 1})
     state.log_event("config", f"cycled {what} (offset {cfg[key]})")
-    async with _render_lock:
-        try:
-            m = await asyncio.to_thread(renderer.render)
-        except Exception as e:
-            log.error("cycle render failed: %s", e, exc_info=True)
-            raise HTTPException(500, f"render failed: {e}")
+    m = await _rerender("cycle")
     return {"config": cfg, "render": m}
+
+
+@app.post("/api/veto")
+async def api_veto(request: Request):
+    """Ban what's on screen. Animal: its common name joins vetoed_animals and
+    the rotation skips it from now on (undo with /api/unveto). Question: it is
+    deleted from the editable bank (the event log keeps the text). Either way
+    the panel re-renders with a replacement immediately."""
+    body = await request.json()
+    what = body.get("what")
+    cfg = state.load_config()
+    if what == "animal":
+        a = datasources.cached_animal()
+        if not a or not a.get("common_name"):
+            raise HTTPException(409, "no animal is currently showing")
+        name = a["common_name"]
+        cfg = await asyncio.to_thread(state.update_config,
+                                      vetoed_animals=cfg["vetoed_animals"] + [name])
+        state.log_event("config", f"vetoed animal: {name}")
+    elif what == "question":
+        cur = _current(cfg)["question"]
+        bank = questions.bank()
+        if len(bank) <= 1:
+            raise HTTPException(409, "can't veto the last question in the bank")
+        del bank[cur["index"]]
+        await asyncio.to_thread(questions.save_bank, bank)
+        state.log_event("config", f"vetoed question: {cur['text']}")
+    else:
+        raise HTTPException(400, "what must be animal|question")
+    m = await _rerender("veto")
+    return {"render": m, "current": _current(state.load_config())}
+
+
+@app.post("/api/unveto")
+async def api_unveto(request: Request):
+    body = await request.json()
+    name = body.get("animal")
+    cfg = state.load_config()
+    if name not in cfg["vetoed_animals"]:
+        raise HTTPException(404, "not vetoed")
+    cfg = await asyncio.to_thread(
+        state.update_config,
+        vetoed_animals=[n for n in cfg["vetoed_animals"] if n != name])
+    state.log_event("config", f"restored animal: {name}")
+    return {"config": cfg}
+
+
+# ── Question bank (editable from the pane) ───────────────────────────────────
+
+def _bank_payload() -> dict:
+    cfg = state.load_config()
+    return {
+        "questions": [{"category": c, "text": t} for c, t in questions.bank()],
+        "current_index": questions.index_for(date.today(), cfg["question_offset"],
+                                             cfg["question_period_days"]),
+        "customised": questions._bank_path().exists(),
+    }
+
+
+@app.get("/api/questions")
+async def api_questions():
+    return _bank_payload()
+
+
+@app.put("/api/questions")
+async def api_questions_put(request: Request):
+    """Replace the whole bank: body {"questions": [{category, text}, ...]}."""
+    body = await request.json()
+    rows = body.get("questions") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        raise HTTPException(400, "body must be {questions: [...]}")
+    try:
+        saved = await asyncio.to_thread(questions.save_bank, rows)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    state.log_event("config", f"question bank saved ({len(saved)} questions)")
+    await _rerender("question edit")
+    return _bank_payload()
+
+
+@app.delete("/api/questions")
+async def api_questions_reset():
+    """Discard edits and go back to the shipped bank."""
+    await asyncio.to_thread(questions.reset_bank)
+    state.log_event("config", "question bank reset to defaults")
+    await _rerender("question reset")
+    return _bank_payload()
 
 
 @app.get("/api/preview.png")

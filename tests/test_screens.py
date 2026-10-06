@@ -21,7 +21,7 @@ def test_full_panel_resolution_render(data_dir, fake_data):
 def test_dashboard_survives_every_source_down(data_dir, monkeypatch):
     import datasources
     monkeypatch.setattr(datasources, "get_weather", lambda lat, lon: None)
-    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1: None)
+    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): None)
     monkeypatch.setattr(datasources, "get_now_playing", lambda: None)
     img = screens.dashboard(1600, 1200)
     assert img.size == (1600, 1200)  # degraded, never blank/crashed

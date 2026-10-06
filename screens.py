@@ -364,7 +364,8 @@ def dashboard(width: int, height: int) -> Image.Image:
 
     weather = datasources.get_weather(cfg["latitude"], cfg["longitude"])
     animal = datasources.get_animal(offset=cfg["animal_offset"],
-                                    period_days=cfg["animal_period_days"])
+                                    period_days=cfg["animal_period_days"],
+                                    vetoed=cfg["vetoed_animals"])
     now_playing = datasources.get_now_playing() if cfg["show_now_playing"] else None
     q = questions.question_for(date.today(), cfg["question_offset"],
                                cfg["question_period_days"])
