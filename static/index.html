@@ -489,8 +489,9 @@ function renderState(st) {
   const last = st.last_checkin;
   const stats = [];
   if (last) {
-    stats.push(['Battery', last.battery_voltage != null ? last.battery_voltage.toFixed(2) + ' V' : '—',
-                last.battery_voltage != null && last.battery_voltage < 3.5 ? 'red' : 'green']);
+    const pct = st.battery_percent;
+    stats.push(['Battery', pct != null ? `${pct}% · ${last.battery_voltage.toFixed(2)} V` : '—',
+                pct != null && pct <= 20 ? 'red' : 'green']);
     stats.push(['Wi-Fi RSSI', last.rssi != null ? last.rssi + ' dBm' : '—', 'blue']);
     stats.push(['Boot count', last.boot_count ?? '—', '']);
     stats.push(['Shown version', last.shown_version ?? '—',

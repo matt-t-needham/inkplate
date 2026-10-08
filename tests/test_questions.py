@@ -73,12 +73,15 @@ def test_categories_are_evenly_balanced():
 def test_house_style_holds():
     """Seminar-prompt tone creeps back in if nobody checks for it."""
     banned = ("discuss", "defend your", "supererogatory", "decision procedure",
-              "thought experiment:", "(computing)", "(medical)", "(global)")
+              "thought experiment:", "(computing)", "(medical)", "(global)",
+              # setup-then-tag phrasing the bank was rewritten to drop
+              "convinced?", "push back", "change my mind", "agree?", "fair?",
+              "too harsh?", "sound right?", "overstated?", "sell me")
     for _, text in questions.BANK:
         low = text.lower()
         for b in banned:
             assert b not in low, f"{b!r} in {text!r}"
-        assert text.endswith(("?", ".")), text
+        assert text.endswith("?"), text  # one direct question, nothing after
         assert len(text) <= 150, text  # four wrapped lines on the panel
 
 

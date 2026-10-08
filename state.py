@@ -204,3 +204,50 @@ def log_checkin(payload: dict) -> None:
 
 def read_checkins(limit: int = 50) -> list[dict]:
     return _read_ndjson(config.DATA_DIR / "checkins.ndjson", limit)
+
+
+# ── battery ───────────────────────────────────────────────────────────────────
+
+# Resting voltage → charge for a single-cell Li-ion/LiPo under the light load
+# of a waking ESP32. Approximate (cells and temperature vary); good enough for
+# a "should I charge it this week" glance. Linear between points.
+_LIION_CURVE = [(3.30, 0), (3.50, 10), (3.60, 20), (3.65, 30), (3.70, 40),
+                (3.75, 50), (3.80, 60), (3.90, 70), (4.00, 80), (4.10, 90),
+                (4.20, 100)]
+
+# Panel shows the battery only if the device has checked in this recently.
+BATTERY_MAX_AGE_S = 48 * 3600
+
+
+def battery_percent(volts) -> int | None:
+    """Voltage → 0–100 %, or None for a missing/implausible reading."""
+    try:
+        v = float(volts)
+    except (TypeError, ValueError):
+        return None
+    if not 2.5 <= v <= 5.0:
+        return None
+    pts = _LIION_CURVE
+    if v <= pts[0][0]:
+        return 0
+    if v >= pts[-1][0]:
+        return 100
+    for (v0, p0), (v1, p1) in zip(pts, pts[1:]):
+        if v0 <= v <= v1:
+            return round(p0 + (p1 - p0) * (v - v0) / (v1 - v0))
+    return None
+
+
+def panel_battery() -> int | None:
+    """Battery % for the panel, in 10 % steps. Uses the median voltage of the
+    last three check-ins so ADC noise can't flap it across a step boundary —
+    every change of the drawn number costs a full ~20 s panel refresh (the
+    frame's content hash changes). None when there's no recent reading."""
+    recent = [c for c in read_checkins(limit=3)
+              if time.time() - c.get("ts", 0) < BATTERY_MAX_AGE_S
+              and battery_percent(c.get("battery_voltage")) is not None]
+    if not recent:
+        return None
+    volts = sorted(float(c["battery_voltage"]) for c in recent)
+    pct = battery_percent(volts[len(volts) // 2])
+    return int(round(pct / 10.0) * 10)

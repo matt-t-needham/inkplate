@@ -29,7 +29,7 @@ def test_index_served(client):
 def test_state_shape(client):
     st = client.get("/api/state").json()
     assert set(st) == {"config", "screens", "render", "last_checkin", "checkins", "events",
-                       "current"}
+                       "current", "battery_percent"}
     assert "placeholder" in st["screens"]
     assert st["last_checkin"] is None
 
@@ -107,6 +107,7 @@ def test_checkin_flow(client):
     st = client.get("/api/state").json()
     assert st["last_checkin"]["battery_voltage"] == 3.91
     assert st["last_checkin"]["rssi"] == -61
+    assert st["battery_percent"] == 71
 
 
 def test_checkin_error_creates_event(client):

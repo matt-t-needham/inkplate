@@ -78,6 +78,8 @@ async def api_state():
         "screens": list(screens.SCREENS.keys()),
         "render": renderer.meta(),
         "last_checkin": checkins[0] if checkins else None,
+        "battery_percent": (state.battery_percent(checkins[0].get("battery_voltage"))
+                            if checkins else None),
         "checkins": checkins,
         "events": state.read_events(limit=50),
         "current": _current(cfg),
