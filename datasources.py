@@ -51,6 +51,12 @@ def _get_bytes(url: str, timeout: float = 30.0) -> bytes:
         return r.content
 
 
+def slot_for(day: date, period_days: int = 1, offset: int = 0) -> int:
+    """The content slot for a date: an integer that advances once every
+    `period_days`, plus the pane's manual cycle `offset`."""
+    return day.toordinal() // max(1, int(period_days)) + offset
+
+
 # ── cache helpers ─────────────────────────────────────────────────────────────
 
 def _cache_dir() -> Path:
@@ -623,10 +629,8 @@ def get_animal(day: date | None = None, offset: int = 0,
     changes (1 = daily); `offset` advances the sequence — the pane's "next
     animal" button.
     """
-    import questions  # slot_for lives there; shared by both daily widgets
-
     day = day or date.today()
-    slot = questions.slot_for(day, period_days, offset)
+    slot = slot_for(day, period_days, offset)
     vetoed = set(vetoed)
     meta = _cache_read("animal.json")
     if (meta and meta.get("data", {}).get("slot") == slot

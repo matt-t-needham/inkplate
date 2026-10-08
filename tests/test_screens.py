@@ -24,6 +24,8 @@ def test_dashboard_survives_every_source_down(data_dir, monkeypatch):
     monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): None)
     monkeypatch.setattr(datasources, "get_now_playing", lambda: None)
     monkeypatch.setattr(datasources, "get_snow", lambda lat, lon: None)
+    import quotes
+    monkeypatch.setattr(quotes, "get_quote", lambda day=None, fits=None, vetoed=(): None)
     img = screens.dashboard(1600, 1200)
     assert img.size == (1600, 1200)  # degraded, never blank/crashed
 
@@ -175,3 +177,11 @@ def test_dashboard_snow_toggle_and_location(data_dir, fake_data, monkeypatch):
 def test_dow():
     assert screens._dow("2026-12-16") == "Wed"
     assert screens._dow(None) == "?"
+
+
+def test_quote_fits_and_attribution():
+    assert screens.quote_fits("Short and sweet.")
+    assert not screens.quote_fits("word " * 120)
+    q = {"author": "Mark Twain", "work": "Following the Equator", "year": "1897"}
+    assert screens.quote_attribution(q) == "— Mark Twain, Following the Equator (1897)"
+    assert screens.quote_attribution(q, with_work=False) == "— Mark Twain (1897)"

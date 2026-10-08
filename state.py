@@ -40,17 +40,18 @@ DEFAULT_CONFIG = {
     "snow_latitude": config.DEFAULT_SNOW_LATITUDE,
     "snow_longitude": config.DEFAULT_SNOW_LONGITUDE,
     "snow_location_name": config.DEFAULT_SNOW_LOCATION_NAME,
-    # Sequence offsets for the pane's "next animal"/"next question" cycle
-    # buttons (layout testing) — advance the deterministic pick.
+    # Sequence offset for the pane's "next animal" button (layout testing) —
+    # advances the deterministic pick.
     "animal_offset": 0,
-    "question_offset": 0,
-    # How often the animal/question change, in days (1 = daily). Independent
+    # How often the animal changes, in days (1 = daily). Independent
     # of refresh_minutes, which governs how often the panel itself redraws —
     # the weather wants the hourly refresh, these do not.
     "animal_period_days": 1,
-    "question_period_days": 1,
     # Common names of animals vetoed from the pane — skipped by the rotation.
     "vetoed_animals": [],
+    # Quote texts vetoed from the pane — never shown again (matched by
+    # quotes.key, so punctuation/case differences don't matter).
+    "vetoed_quotes": [],
     # Monotonic content version. The device compares this against the version
     # it stored in RTC memory to decide whether to redraw (a redraw costs ~20s
     # and visible flashing, so unchanged content must never trigger one).
@@ -133,17 +134,20 @@ def update_config(**changes) -> dict:
 
     if "show_now_playing" in changes:
         cfg["show_now_playing"] = bool(changes["show_now_playing"])
-    for key in ("animal_offset", "question_offset"):
-        if key in changes:
-            cfg[key] = int(changes[key])
-    for key in ("animal_period_days", "question_period_days"):
-        if key in changes:
-            cfg[key] = max(1, min(365, int(changes[key])))
+    if "animal_offset" in changes:
+        cfg["animal_offset"] = int(changes["animal_offset"])
+    if "animal_period_days" in changes:
+        cfg["animal_period_days"] = max(1, min(365, int(changes["animal_period_days"])))
     if "vetoed_animals" in changes:
         v = changes["vetoed_animals"]
         if not isinstance(v, list):
             raise TypeError("vetoed_animals must be a list")
         cfg["vetoed_animals"] = sorted({str(n)[:80] for n in v})
+    if "vetoed_quotes" in changes:
+        v = changes["vetoed_quotes"]
+        if not isinstance(v, list):
+            raise TypeError("vetoed_quotes must be a list")
+        cfg["vetoed_quotes"] = list(dict.fromkeys(str(t)[:400] for t in v))
     save_config(cfg)
     return cfg
 

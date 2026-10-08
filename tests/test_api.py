@@ -135,36 +135,12 @@ def test_head_supported_on_device_endpoints(client):
     assert client.head("/api/display/meta").status_code == 200
 
 
-def test_cycle_animal_and_question(client):
+def test_cycle_animal(client):
     st0 = client.get("/api/state").json()
     r = client.post("/api/cycle", json={"what": "animal"})
     assert r.status_code == 200
     assert r.json()["config"]["animal_offset"] == st0["config"]["animal_offset"] + 1
-
-    r = client.post("/api/cycle", json={"what": "question"})
-    assert r.status_code == 200
-    assert r.json()["config"]["question_offset"] == 1
-
-    assert client.post("/api/cycle", json={"what": "weather"}).status_code == 400
-
-
-def test_cycle_question_changes_content_and_version(client):
-    client.post("/api/config", json={"screen": "dashboard"})
-    v1 = client.post("/api/render").json()["image_version"]
-    r = client.post("/api/cycle", json={"what": "question"}).json()
-    # different question -> different pixels -> hash-driven version bump
-    assert r["render"]["image_version"] == v1 + 1
-
-
-def test_veto_question_removes_it_and_moves_on(client):
-    cur = client.get("/api/state").json()["current"]["question"]
-    r = client.post("/api/veto", json={"what": "question"})
-    assert r.status_code == 200
-    bank = client.get("/api/questions").json()
-    assert bank["customised"] is True
-    assert cur["text"] not in [q["text"] for q in bank["questions"]]
-    assert r.json()["current"]["question"]["text"] != cur["text"]
-    assert client.post("/api/veto", json={"what": "weather"}).status_code == 400
+    assert client.post("/api/cycle", json={"what": "question"}).status_code == 400
 
 
 def test_veto_and_restore_animal(client):
@@ -177,16 +153,26 @@ def test_veto_and_restore_animal(client):
     assert client.post("/api/unveto", json={"animal": "fox"}).status_code == 200
     assert state.load_config()["vetoed_animals"] == []
     assert client.post("/api/unveto", json={"animal": "fox"}).status_code == 404
+    assert client.post("/api/veto", json={"what": "weather"}).status_code == 400
 
 
-def test_question_bank_edit_and_reset(client):
-    bank = client.get("/api/questions").json()
-    qs = bank["questions"]
-    qs[bank["current_index"]]["text"] = "Rewritten from the pane?"
-    r = client.put("/api/questions", json={"questions": qs})
-    assert r.status_code == 200
-    assert client.get("/api/state").json()["current"]["question"]["text"] == "Rewritten from the pane?"
-    assert client.put("/api/questions", json={"questions": []}).status_code == 400
-    assert client.put("/api/questions", json=[1]).status_code == 400
-    r = client.delete("/api/questions")
-    assert r.json()["customised"] is False
+def test_veto_and_restore_quote(client):
+    import datasources
+    import quotes
+    assert client.post("/api/veto", json={"what": "quote"}).status_code == 409  # none chosen
+    q = {"text": "Be yourself.", "author": "Someone", "work": None, "year": "1900",
+         "qotd_date": "2015-01-01", "key": quotes.key("Be yourself.")}
+    datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": q})
+    cur = client.get("/api/state").json()["current"]["quote"]
+    assert cur["author"] == "Someone" and cur["year"] == "1900"
+    assert client.post("/api/veto", json={"what": "quote"}).status_code == 200
+    assert state.load_config()["vetoed_quotes"] == ["Be yourself."]
+    assert client.get("/api/state").json()["current"]["vetoed_quotes"] == ["Be yourself."]
+    assert client.post("/api/unveto", json={"quote": "Be yourself."}).status_code == 200
+    assert state.load_config()["vetoed_quotes"] == []
+    assert client.post("/api/unveto", json={"quote": "Be yourself."}).status_code == 404
+    assert client.post("/api/unveto", json={}).status_code == 400
+
+
+def test_question_endpoints_are_gone(client):
+    assert client.get("/api/questions").status_code in (404, 405)

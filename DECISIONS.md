@@ -214,6 +214,27 @@ Scene-vs-figure is decided by ink coverage, threshold set from measurement
 rather than taste: single figures top out near 39% (a heron filling its
 sheet), true scenes run 60%+ (a forest engraving), so the line sits at 50%.
 
+## 20g. Questions retired for Wikiquote's quote of the day (tenth pass)
+The curated questions never read well, even after the 20f rewrite, so the
+talking point is now a real quote: Wikiquote's Quote of the Day, fetched
+daily. The bank, its editor, question vetoes and cadence are gone.
+
+**Attribution and date are the point.** A QOTD page gives only the text and
+an author link, so each candidate is looked up on the author's page: it must
+appear outside any Disputed / Misattributed / Attributed / "about" section,
+and the citation under it (or the section heading) must yield a year. Work
+title comes from the citation's italics or the section heading. Fail any of
+that and the candidate is skipped — the panel never shows an unplaced quote.
+
+**Fit before fetch.** `screens.quote_fits` wraps the text in the real font at
+panel size; over three lines and it's skipped, never truncated. Measured at
+1600×1200 always, so a small test render can't change the day's pick.
+
+**No repeats.** Replacements come from seeded random archive dates strictly
+before 2026-10-07 (the day this shipped), so a fallback can't be a quote the
+live feed will serve later; a history of shown quotes catches Wikiquote's own
+re-runs. A day that finds nothing backs off 30 min between sweeps.
+
 ## 20f. Question rewrite, and never print a placeholder (ninth pass)
 **Questions** were rewritten to a house style now recorded at the top of
 `questions.py`: casual and spoken, and where possible *taking a side and

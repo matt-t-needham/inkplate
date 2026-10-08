@@ -22,10 +22,12 @@ the panel):
   snow, storm, hail), today's sunrise/sunset, and three days with low on the
   left and high on the right in both units. Location is set in the control
   pane (defaults to the HTPC's IP geolocation).
-- **Talking point** — a daily question from the curated bank in
-  `questions.py` (personal, philosophy, politics, ethics: moral / medical /
-  computing / global). Date-seeded: same question all day, no repeats until
-  the whole bank has cycled (~4 months). Edit the bank freely.
+- **Quote** — Wikiquote's Quote of the Day (`quotes.py`), always shown with
+  who said it, the work, and the year. A quote is only used if it can be
+  found on the author's Wikiquote page in a sourced section (never Disputed /
+  Misattributed) with a year, fits in three lines, and hasn't been shown or
+  vetoed; otherwise a replacement comes from the QOTD archive before
+  2026-10-07, so fallbacks can't collide with the live feed.
 - **Animal engraving** — a daily historical animal print from Wikimedia
   Commons, rotating across seven corpuses: Iconographia Zoologica (Amsterdam,
   1700-1880, the reliable backstop), Gessner's 1551 *Historiae animalium*,
@@ -96,11 +98,13 @@ docker logs apps-inkplate-1 -f
   pixels the device gets), *raw* (pre-dither RGB).
 - **Render now → push** — re-renders and bumps the content version. The device
   redraws at its next wake; in tethered mode that's within seconds.
-- **Next animal / Next question** — advance the daily sequences for layout
-  testing. Persisted as offsets, so the preview and the device stay in sync.
+- **Next animal** — advances the daily animal for layout testing. Persisted
+  as an offset, so the preview and the device stay in sync.
+- **Now showing** — the current animal and quote, each with a **Veto**
+  button (skipped from then on; restorable from the chips underneath).
 - **Configuration** — screen picker, refresh cadence (how often the panel
-  redraws — keeps the temperature current), separate animal and question
-  cadences in days (default daily), location, tethered mode. Applies live;
+  redraws — keeps the temperature current), animal cadence in days (default
+  daily), weather and snow locations, tethered mode. Applies live;
   the device picks up cadence changes at its next check-in.
 - **Device check-ins** — battery voltage, Wi-Fi signal, boot count, errors.
   The header badge turns red if the device misses ~2.5 wake windows.
