@@ -175,11 +175,3 @@ def test_dashboard_snow_toggle_and_location(data_dir, fake_data, monkeypatch):
 def test_dow():
     assert screens._dow("2026-12-16") == "Wed"
     assert screens._dow(None) == "?"
-
-
-def test_dashboard_draws_battery_only_with_a_checkin(data_dir, fake_data):
-    import state
-    blank = screens.dashboard(1600, 1200).crop((1400, 1140, 1600, 1200))
-    state.log_checkin({"battery_voltage": 3.62})
-    drawn = screens.dashboard(1600, 1200).crop((1400, 1140, 1600, 1200))
-    assert blank.tobytes() != drawn.tobytes()

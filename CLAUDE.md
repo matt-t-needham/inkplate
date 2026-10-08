@@ -21,7 +21,7 @@ Module map:
 | `questions.py` | Curated talking-point bank (120, balanced 30 per category) + slot-seeded pick (no repeats within a full cycle). **House style is documented in the module docstring and enforced by tests** — one plain, direct question, no "statement — convinced?" setups; keep the categories even. The pane can edit the bank (`data/questions.json` overrides `BANK`), so a shipped rewrite only shows after the pane's "Reset to defaults". `slot_for(day, period_days, offset)` is the shared content-slot helper both daily widgets key off — the animal cache is keyed by slot too |
 | `renderer.py` | Orchestration + disk cache (`data/render/{raw,dithered,panel}.png` + `meta.json`); `ensure_fresh()` re-renders on staleness/screen change; serves stale frame if a render fails |
 | `palette.py` | Spectra-6 palettes + Floyd-Steinberg dither (Pillow C core). `DITHER_PALETTE` order = firmware color indexes — don't reorder |
-| `state.py` | `config.json` (atomic writes) + self-capping ndjson logs (`events`, `checkins`). Battery: `battery_percent` (Li-ion voltage curve) and `panel_battery` (median of last 3 check-ins, 10 % steps — every change in the drawn number is a 20 s redraw) |
+| `state.py` | `config.json` (atomic writes) + self-capping ndjson logs (`events`, `checkins`). Battery: `battery_percent` (Li-ion voltage curve) — shown in the pane only, deliberately never on the panel |
 | `static/index.html` | Single-file control pane, Catppuccin Mocha, no build step. **Relative URLs only** — served at `:3008/` (LAN, device + pane) and `inkplate.bix.computer` (tunnel, behind Access) |
 | `firmware/inkplate_dash/` | Arduino sketch + `config.h.example` (real `config.h` is gitignored — Wi-Fi creds) |
 

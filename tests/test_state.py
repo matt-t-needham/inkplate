@@ -77,11 +77,3 @@ def test_battery_percent_curve():
     assert state.battery_percent(None) is None
     assert state.battery_percent("junk") is None
     assert state.battery_percent(0.0) is None   # ADC not wired / no battery
-
-
-def test_panel_battery_uses_median_and_steps(data_dir):
-    import state
-    assert state.panel_battery() is None        # never checked in
-    for v in (3.91, 3.50, 3.92):                # one noisy low reading
-        state.log_checkin({"battery_voltage": v})
-    assert state.panel_battery() == 70          # median 3.91 -> 71% -> 70

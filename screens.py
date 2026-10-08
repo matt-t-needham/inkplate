@@ -526,33 +526,7 @@ def dashboard(width: int, height: int) -> Image.Image:
     if snow:
         _snow_report(d, LX, qtop - Y(40), snow, X, Y, halo)
 
-    # ── battery, small in the bottom-right corner ─────────────────────────────
-    batt = state.panel_battery()
-    if batt is not None:
-        _battery(d, width - X(40), height - Y(34), batt, Y, halo)
-
     return img
-
-
-def _battery(d, right, bottom, pct, Y, halo):
-    """Outline cell with a proportional fill and the percentage beside it,
-    right-aligned at (right, bottom). Red at 20 % and below."""
-    col = RED if pct <= 20 else BLACK
-    f = _font(Y(22))  # DejaVu: Michroma's % glyph reads as "º/o"
-    txt = f"{pct}%"
-    bw, bh, nub = Y(38), Y(18), Y(4)
-    tw = d.textlength(txt, font=f)
-    x0 = right - bw - nub - Y(8) - tw
-    y0 = bottom - bh
-    lw = max(1, Y(2))
-    d.rectangle([x0 - lw, y0 - lw, x0 + bw + nub + lw, bottom + lw], fill=WHITE)
-    d.rectangle([x0, y0, x0 + bw, bottom], outline=col, width=lw)
-    d.rectangle([x0 + bw, y0 + bh // 3, x0 + bw + nub, bottom - bh // 3], fill=col)
-    inner = int((bw - 4 * lw) * pct / 100)
-    if inner > 0:
-        d.rectangle([x0 + 2 * lw, y0 + 2 * lw, x0 + 2 * lw + inner, bottom - 2 * lw],
-                    fill=col)
-    d.text((x0 + bw + nub + Y(8), y0 - Y(3)), txt, font=f, fill=col, **halo)
 
 
 # ── dashboard helpers: temperatures, snow report ─────────────────────────────
