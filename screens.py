@@ -442,10 +442,14 @@ def dashboard(width: int, height: int) -> Image.Image:
             clause = "drawn" if year else None
         if clause and year:
             clause += f", {year}"
-        bits2 = [f"of {animal['native']}" if animal.get("native") else None, clause]
-        line2 = " · ".join(b for b in bits2 if b)
+        # One idea per line ("of the Cascades" / "as depicted by …"), wrapped
+        # narrow enough to stay clear of the weather block's HIGH column.
+        rest = [f"of {animal['native']}" if animal.get("native") else None, clause]
         f_cap = _font(Y(26), style="serif_italic")
-        cap_lines = (_wrap(d, line1, f_cap, X(700)) + _wrap(d, line2, f_cap, X(700)))[:3]
+        cap_lines = []
+        for part in [line1] + [r for r in rest if r]:
+            cap_lines += _wrap(d, part, f_cap, X(CAPTION_WIDTH))
+        cap_lines = cap_lines[:4]
         cy = Y(36)
         for ln in cap_lines:
             d.text((width - X(48) - d.textlength(ln, font=f_cap), cy),
@@ -530,13 +534,15 @@ def dashboard(width: int, height: int) -> Image.Image:
         d.text((LX, qy + Y(6)), attr, font=f_a, fill=BLACK, **halo)
 
     if snow:
-        _snow_report(d, LX, qtop - Y(40), snow, X, Y, halo)
+        _snow_report(d, LX, qtop - Y(40), snow, X, Y, halo,
+                     name=cfg["snow_location_name"])
 
     return img
 
 
 # ── dashboard helpers: quote, temperatures, snow report ──────────────────────
 
+CAPTION_WIDTH = 520   # top-right animal caption; wider collides with HIGH
 QUOTE_SIZE = 40        # serif italic, panel px
 QUOTE_WIDTH = 1060     # leaves the art its right-hand side
 QUOTE_MAX_LINES = 3    # longer quotes are skipped, not truncated
@@ -595,8 +601,9 @@ def _cm(v) -> int:
     return round(v or 0)
 
 
-def _snow_report(d, x, bottom, snow, X, Y, halo):
-    """Snowpack row (base, +72 h with a small red "3d" range tag), then a row
+def _snow_report(d, x, bottom, snow, X, Y, halo, name: str = ""):
+    """Location label, snowpack row (base, +72 h with a small red "3d" range
+    tag), then a row
     of the coming days: forecast glyph, with the cm amount over the weekday
     centred on it. Heavy days (≥ SNOW_HEAVY_CM) in blue. `bottom` is the
     bottom edge, so it always sits just above the quote."""
@@ -638,6 +645,10 @@ def _snow_report(d, x, bottom, snow, X, Y, halo):
             w += X(6) + d.textlength(tag, font=f_tag)
         d.text((x2, y2 + Y(66)), lab, font=f_lab, fill=BLACK, **halo)
         x2 += max(w, d.textlength(lab, font=f_lab)) + X(48)
+
+    # Location label on top, same size as the row labels.
+    if name:
+        d.text((x, y2 - Y(30)), name, font=f_lab, fill=BLACK, **halo)
 
 
 def placeholder(width: int, height: int) -> Image.Image:
