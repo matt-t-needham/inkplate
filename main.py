@@ -13,7 +13,6 @@ import asyncio
 import logging
 import logging.handlers
 import os
-from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -36,7 +35,7 @@ except OSError as e:
     log.warning("file logging unavailable: %s", e)
 
 import datasources  # noqa: E402
-import questions  # noqa: E402
+import quotes  # noqa: E402
 import renderer  # noqa: E402
 import screens  # noqa: E402
 import state  # noqa: E402
@@ -78,6 +77,8 @@ async def api_state():
         "screens": list(screens.SCREENS.keys()),
         "render": renderer.meta(),
         "last_checkin": checkins[0] if checkins else None,
+        "battery_percent": (state.battery_percent(checkins[0].get("battery_voltage"))
+                            if checkins else None),
         "checkins": checkins,
         "events": state.read_events(limit=50),
         "current": _current(cfg),
@@ -85,16 +86,17 @@ async def api_state():
 
 
 def _current(cfg: dict) -> dict:
-    """What the dashboard is showing right now — for the pane's veto/edit card.
-    The animal comes from the fetch cache (no network on the 10 s poll)."""
+    """What the dashboard is showing right now — for the pane's veto card.
+    Both come from caches (no network on the 10 s poll)."""
     a = datasources.cached_animal()
-    i = questions.index_for(date.today(), cfg["question_offset"], cfg["question_period_days"])
-    cat, text = questions.bank()[i]
+    q = quotes.cached_quote()
     return {
         "animal": {k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
                                           "collection")} if a else None,
-        "question": {"index": i, "category": cat, "text": text},
+        "quote": {k: q.get(k) for k in ("text", "author", "work", "year",
+                                         "qotd_date")} if q else None,
         "vetoed_animals": cfg["vetoed_animals"],
+        "vetoed_quotes": cfg["vetoed_quotes"],
     }
 
 
@@ -112,7 +114,7 @@ async def api_config(request: Request):
     body = await request.json()
     allowed = {"refresh_minutes", "screen", "tethered", "tethered_poll_seconds",
                "latitude", "longitude", "location_name", "show_now_playing",
-               "animal_period_days", "question_period_days",
+               "animal_period_days",
                "show_snow", "snow_latitude", "snow_longitude", "snow_location_name"}
     changes = {k: v for k, v in body.items() if k in allowed}
     if not changes:
@@ -140,13 +142,13 @@ async def api_render():
 
 @app.post("/api/cycle")
 async def api_cycle(request: Request):
-    """Advance the daily animal or question sequence by one — the pane's
-    layout-testing buttons. Persists (device and preview stay in sync);
+    """Advance the daily animal sequence by one — the pane's layout-testing
+    button. Persists (device and preview stay in sync);
     re-renders immediately, version bumps via the content hash."""
     body = await request.json()
     what = body.get("what")
-    if what not in ("animal", "question"):
-        raise HTTPException(400, "what must be animal|question")
+    if what != "animal":
+        raise HTTPException(400, "what must be animal")
     key = f"{what}_offset"
     cfg = state.load_config()
     cfg = await asyncio.to_thread(state.update_config, **{key: cfg[key] + 1})
@@ -158,9 +160,9 @@ async def api_cycle(request: Request):
 @app.post("/api/veto")
 async def api_veto(request: Request):
     """Ban what's on screen. Animal: its common name joins vetoed_animals and
-    the rotation skips it from now on (undo with /api/unveto). Question: it is
-    deleted from the editable bank (the event log keeps the text). Either way
-    the panel re-renders with a replacement immediately."""
+    the rotation skips it from now on. Quote: its text joins vetoed_quotes and
+    is never picked again. Undo either with /api/unveto. The panel re-renders
+    with a replacement immediately."""
     body = await request.json()
     what = body.get("what")
     cfg = state.load_config()
@@ -172,74 +174,43 @@ async def api_veto(request: Request):
         cfg = await asyncio.to_thread(state.update_config,
                                       vetoed_animals=cfg["vetoed_animals"] + [name])
         state.log_event("config", f"vetoed animal: {name}")
-    elif what == "question":
-        cur = _current(cfg)["question"]
-        bank = questions.bank()
-        if len(bank) <= 1:
-            raise HTTPException(409, "can't veto the last question in the bank")
-        del bank[cur["index"]]
-        await asyncio.to_thread(questions.save_bank, bank)
-        state.log_event("config", f"vetoed question: {cur['text']}")
+    elif what == "quote":
+        q = quotes.cached_quote()
+        if not q or not q.get("text"):
+            raise HTTPException(409, "no quote is currently showing")
+        await asyncio.to_thread(state.update_config,
+                                vetoed_quotes=cfg["vetoed_quotes"] + [q["text"]])
+        state.log_event("config", f"vetoed quote: {q['text']} — {q.get('author')}")
     else:
-        raise HTTPException(400, "what must be animal|question")
+        raise HTTPException(400, "what must be animal|quote")
     m = await _rerender("veto")
     return {"render": m, "current": _current(state.load_config())}
 
 
 @app.post("/api/unveto")
 async def api_unveto(request: Request):
+    """Restore a vetoed animal ({"animal": name}) or quote ({"quote": text})."""
     body = await request.json()
-    name = body.get("animal")
     cfg = state.load_config()
-    if name not in cfg["vetoed_animals"]:
-        raise HTTPException(404, "not vetoed")
-    cfg = await asyncio.to_thread(
-        state.update_config,
-        vetoed_animals=[n for n in cfg["vetoed_animals"] if n != name])
-    state.log_event("config", f"restored animal: {name}")
+    if "animal" in body:
+        name = body["animal"]
+        if name not in cfg["vetoed_animals"]:
+            raise HTTPException(404, "not vetoed")
+        cfg = await asyncio.to_thread(
+            state.update_config,
+            vetoed_animals=[n for n in cfg["vetoed_animals"] if n != name])
+        state.log_event("config", f"restored animal: {name}")
+    elif "quote" in body:
+        text = body["quote"]
+        if text not in cfg["vetoed_quotes"]:
+            raise HTTPException(404, "not vetoed")
+        cfg = await asyncio.to_thread(
+            state.update_config,
+            vetoed_quotes=[t for t in cfg["vetoed_quotes"] if t != text])
+        state.log_event("config", f"restored quote: {text}")
+    else:
+        raise HTTPException(400, "body must name an animal or a quote")
     return {"config": cfg}
-
-
-# ── Question bank (editable from the pane) ───────────────────────────────────
-
-def _bank_payload() -> dict:
-    cfg = state.load_config()
-    return {
-        "questions": [{"category": c, "text": t} for c, t in questions.bank()],
-        "current_index": questions.index_for(date.today(), cfg["question_offset"],
-                                             cfg["question_period_days"]),
-        "customised": questions._bank_path().exists(),
-    }
-
-
-@app.get("/api/questions")
-async def api_questions():
-    return _bank_payload()
-
-
-@app.put("/api/questions")
-async def api_questions_put(request: Request):
-    """Replace the whole bank: body {"questions": [{category, text}, ...]}."""
-    body = await request.json()
-    rows = body.get("questions") if isinstance(body, dict) else None
-    if not isinstance(rows, list):
-        raise HTTPException(400, "body must be {questions: [...]}")
-    try:
-        saved = await asyncio.to_thread(questions.save_bank, rows)
-    except (ValueError, TypeError) as e:
-        raise HTTPException(400, str(e))
-    state.log_event("config", f"question bank saved ({len(saved)} questions)")
-    await _rerender("question edit")
-    return _bank_payload()
-
-
-@app.delete("/api/questions")
-async def api_questions_reset():
-    """Discard edits and go back to the shipped bank."""
-    await asyncio.to_thread(questions.reset_bank)
-    state.log_event("config", "question bank reset to defaults")
-    await _rerender("question reset")
-    return _bank_payload()
 
 
 @app.get("/api/preview.png")

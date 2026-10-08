@@ -4,7 +4,6 @@ from datetime import date, timedelta
 import pytest
 
 import datasources
-import questions
 
 
 @pytest.fixture()
@@ -313,12 +312,11 @@ def test_animal_offset_changes_slot(data_dir, no_network, monkeypatch):
 
 
 def test_vetoed_animal_is_skipped_even_when_cached(data_dir, no_network, monkeypatch):
-    import questions
     day = date(2026, 9, 17)
     fox = ("fox", "Vulpes", "the Northern Hemisphere", "mammal")
     red = ("red fox", "Vulpes vulpes", "Eurasia", "mammal")
     # Order the list so today's slot lands on "fox".
-    animals = [fox, red] if questions.slot_for(day) % 2 == 0 else [red, fox]
+    animals = [fox, red] if datasources.slot_for(day) % 2 == 0 else [red, fox]
     monkeypatch.setattr(datasources, "ANIMALS", animals)
     monkeypatch.setattr(datasources, "COLLECTIONS", [datasources.COLLECTIONS[0]])
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: COMMONS_RAW)
@@ -492,3 +490,11 @@ def test_snow_parse(data_dir, no_network, monkeypatch):
     assert [d["date"] for d in s["days"]] == ["2026-12-15", "2026-12-16", "2026-12-17"]
     assert s["days"][1]["snow_cm"] == 0          # null -> 0
     assert s["days"][2]["code"] == 75
+
+
+def test_slot_for():
+    d = date(2026, 9, 17)
+    assert datasources.slot_for(d, 1, 0) == d.toordinal()
+    assert datasources.slot_for(d, 7, 0) == d.toordinal() // 7
+    assert datasources.slot_for(d, 7, 2) == d.toordinal() // 7 + 2
+    assert datasources.slot_for(d, 0, 0) == d.toordinal()  # period 0 treated as 1

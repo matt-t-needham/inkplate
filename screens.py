@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 import config
 import datasources
-import questions
+import quotes
 from palette import SPECTRA_COLORS
 
 BLACK = (0, 0, 0)
@@ -353,9 +353,9 @@ def _sun_horizon(d: ImageDraw.ImageDraw, x: int, y: int, size: int, rising: bool
 
 def dashboard(width: int, height: int) -> Image.Image:
     """Minimal dashboard. The daily engraving is a soft, edge-faded background
-    bleeding off the bottom-right corner; weather sits top-left; the talking
-    point runs along the bottom border; source caption top-right. Display
-    type is Michroma (the rage channel font), the question is serif italic.
+    bleeding off the bottom-right corner; weather sits top-left; the daily
+    quote runs along the bottom border; source caption top-right. Display
+    type is Michroma (the rage channel font), the quote is serif italic.
     Every widget degrades independently — a dead API never blanks the panel."""
     # Lazy import: state imports screens (for DEFAULT_SCREEN), so importing
     # state at module top would be circular. At call time it's fully loaded.
@@ -369,8 +369,7 @@ def dashboard(width: int, height: int) -> Image.Image:
     now_playing = datasources.get_now_playing() if cfg["show_now_playing"] else None
     snow = (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
             if cfg["show_snow"] else None)
-    q = questions.question_for(date.today(), cfg["question_offset"],
-                               cfg["question_period_days"])
+    quote = quotes.get_quote(date.today(), fits=quote_fits, vetoed=cfg["vetoed_quotes"])
 
     img = Image.new("RGB", (width, height), WHITE)
     sx = width / 1600  # layout is 1600x1200-based; scales for small test renders
@@ -443,10 +442,14 @@ def dashboard(width: int, height: int) -> Image.Image:
             clause = "drawn" if year else None
         if clause and year:
             clause += f", {year}"
-        bits2 = [f"of {animal['native']}" if animal.get("native") else None, clause]
-        line2 = " · ".join(b for b in bits2 if b)
+        # One idea per line ("of the Cascades" / "as depicted by …"), wrapped
+        # narrow enough to stay clear of the weather block's HIGH column.
+        rest = [f"of {animal['native']}" if animal.get("native") else None, clause]
         f_cap = _font(Y(26), style="serif_italic")
-        cap_lines = (_wrap(d, line1, f_cap, X(700)) + _wrap(d, line2, f_cap, X(700)))[:3]
+        cap_lines = []
+        for part in [line1] + [r for r in rest if r]:
+            cap_lines += _wrap(d, part, f_cap, X(CAPTION_WIDTH))
+        cap_lines = cap_lines[:4]
         cy = Y(36)
         for ln in cap_lines:
             d.text((width - X(48) - d.textlength(ln, font=f_cap), cy),
@@ -512,24 +515,55 @@ def dashboard(width: int, height: int) -> Image.Image:
         d.text((LX, Y(100)), "weather unavailable",
                font=_font(Y(40), style="display"), fill=RED, **halo)
 
-    # ── talking point, running along the bottom border; the snow report
+    # ── quote along the bottom border, attribution beneath; the snow report
     #    (when on) stacks directly above it ──────────────────────────────────
-    f_q = _font(Y(40), style="serif_italic")
-    qlines = _wrap(d, q["text"], f_q, X(1060))[:4]
-    line_h = Y(54)
-    qtop = height - Y(52) - line_h * len(qlines)
-    qy = qtop
-    for ln in qlines:
-        d.text((LX, qy), ln, font=f_q, fill=BLACK, **halo)
-        qy += line_h
+    qtop = height - Y(52)
+    if quote:
+        f_q = _font(Y(QUOTE_SIZE), style="serif_italic")
+        f_a = _font(Y(24))
+        qlines = _wrap(d, f"“{quote['text']}”", f_q, X(QUOTE_WIDTH))[:QUOTE_MAX_LINES]
+        attr = quote_attribution(quote)
+        if d.textlength(attr, font=f_a) > X(QUOTE_WIDTH):
+            attr = quote_attribution(quote, with_work=False)
+        line_h = Y(54)
+        qtop = height - Y(52) - Y(36) - line_h * len(qlines)
+        qy = qtop
+        for ln in qlines:
+            d.text((LX, qy), ln, font=f_q, fill=BLACK, **halo)
+            qy += line_h
+        d.text((LX, qy + Y(6)), attr, font=f_a, fill=BLACK, **halo)
 
     if snow:
-        _snow_report(d, LX, qtop - Y(40), snow, X, Y, halo)
+        _snow_report(d, LX, qtop - Y(40), snow, X, Y, halo,
+                     name=cfg["snow_location_name"])
 
     return img
 
 
-# ── dashboard helpers: temperatures, snow report ─────────────────────────────
+# ── dashboard helpers: quote, temperatures, snow report ──────────────────────
+
+CAPTION_WIDTH = 520   # top-right animal caption; wider collides with HIGH
+QUOTE_SIZE = 40        # serif italic, panel px
+QUOTE_WIDTH = 1060     # leaves the art its right-hand side
+QUOTE_MAX_LINES = 3    # longer quotes are skipped, not truncated
+
+
+def quote_fits(text: str) -> bool:
+    """Would `text` wrap to QUOTE_MAX_LINES or fewer at full panel size? Always
+    measured at 1600x1200 so the day's pick never depends on render size."""
+    d = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    f = _font(QUOTE_SIZE, style="serif_italic")
+    return len(_wrap(d, f"“{text}”", f, QUOTE_WIDTH)) <= QUOTE_MAX_LINES
+
+
+def quote_attribution(q: dict, with_work: bool = True) -> str:
+    """'— Mark Twain, Following the Equator (1897)'. Year is always present
+    (quotes.get_quote rejects undated quotes); the work is optional."""
+    who = q.get("author") or ""
+    if with_work and q.get("work"):
+        who += f", {q['work']}"
+    return f"— {who} ({q['year']})" if q.get("year") else f"— {who}"
+
 
 SNOW_FLAKE = 0xf076   # wi-snowflake-cold
 SNOW_HEAVY_CM = 5     # a day at or above this is drawn in blue ("go skiing")
@@ -567,11 +601,12 @@ def _cm(v) -> int:
     return round(v or 0)
 
 
-def _snow_report(d, x, bottom, snow, X, Y, halo):
-    """Snowpack row (base, +72 h with a small red "3d" range tag), then a row
+def _snow_report(d, x, bottom, snow, X, Y, halo, name: str = ""):
+    """Location label, snowpack row (base, +72 h with a small red "3d" range
+    tag), then a row
     of the coming days: forecast glyph, with the cm amount over the weekday
     centred on it. Heavy days (≥ SNOW_HEAVY_CM) in blue. `bottom` is the
-    bottom edge, so it always sits just above the question."""
+    bottom edge, so it always sits just above the quote."""
     f_big = _font(Y(52), style="display")
     f_lab = _font(Y(19), style="display")
     f_amt = _font(Y(30), style="display")
@@ -610,6 +645,10 @@ def _snow_report(d, x, bottom, snow, X, Y, halo):
             w += X(6) + d.textlength(tag, font=f_tag)
         d.text((x2, y2 + Y(66)), lab, font=f_lab, fill=BLACK, **halo)
         x2 += max(w, d.textlength(lab, font=f_lab)) + X(48)
+
+    # Location label on top, same size as the row labels.
+    if name:
+        d.text((x, y2 - Y(30)), name, font=f_lab, fill=BLACK, **halo)
 
 
 def placeholder(width: int, height: int) -> Image.Image:

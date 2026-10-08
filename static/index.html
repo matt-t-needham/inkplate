@@ -93,7 +93,7 @@
   td { padding:4px 6px; border-top:1px solid var(--surface1); font-variant-numeric:tabular-nums; }
   .empty { color:var(--subtext); font-size:13px; padding:6px 0; }
 
-  /* Now showing + question bank */
+  /* Now showing */
   .now-row { margin-bottom:14px; }
   .now-row .k { color:var(--subtext); font-size:11px; margin-bottom:4px; }
   .now-row .v { font-weight:600; }
@@ -104,24 +104,13 @@
     border-radius:7px; padding:5px 12px; font:inherit; cursor:pointer;
   }
   button.danger:disabled, button.ghost:disabled { opacity:.5; cursor:default; }
-  textarea, .qcat {
-    background:var(--bg); color:var(--text); border:1px solid var(--surface1);
-    border-radius:6px; padding:6px 8px; font:inherit; width:100%;
-  }
-  textarea { resize:vertical; min-height:58px; }
   .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
   .chip {
     background:var(--bg); border:1px solid var(--surface1); border-radius:12px;
     padding:1px 4px 1px 10px; font-size:12px; display:flex; align-items:center; gap:4px;
   }
   .chip button { background:none; border:none; color:var(--subtext); cursor:pointer; font:inherit; }
-  details summary { cursor:pointer; color:var(--subtext); font-size:11px; letter-spacing:.08em;
-    text-transform:uppercase; font-weight:600; }
-  #bank-list { display:flex; flex-direction:column; gap:8px; max-height:560px; overflow-y:auto; margin-top:12px; }
-  .qrow { display:grid; grid-template-columns:110px 1fr auto; gap:8px; align-items:start;
-    padding:6px; border-radius:7px; }
-  .qrow.current { background:var(--surface1); }
-  .qrow textarea { min-height:44px; }
+  .now-row .v.quote { font-weight:400; font-style:italic; font-family:Georgia, serif; }
   .msg { font-size:12px; } .msg.ok { color:var(--green); } .msg.err { color:var(--red); }
 
   /* Event log */
@@ -151,7 +140,6 @@
         </div>
         <button class="primary" id="btn-render">Render now → push</button>
         <button class="ghost" id="btn-cycle-animal">Next animal</button>
-        <button class="ghost" id="btn-cycle-question">Next question</button>
         <span class="push-note">push bumps the version; the device redraws at its next wake</span>
       </div>
       <div class="meta-line" id="render-meta">no render yet</div>
@@ -167,18 +155,6 @@
       <div class="empty" id="checkin-empty" hidden>No check-ins yet — the device hasn't phoned home. Expected until it arrives and is flashed.</div>
     </div>
 
-    <div class="card">
-      <details id="bank-details">
-        <summary>Question bank <span id="bank-count"></span></summary>
-        <div class="btn-row">
-          <button class="primary" id="btn-bank-save">Save bank</button>
-          <button class="ghost" id="btn-bank-add">Add question</button>
-          <button class="ghost" id="btn-bank-reset">Reset to defaults</button>
-          <span class="msg" id="bank-msg"></span>
-        </div>
-        <div id="bank-list"></div>
-      </details>
-    </div>
   </div>
 
   <div class="col">
@@ -192,13 +168,11 @@
         <div class="chips" id="vetoed-animals"></div>
       </div>
       <div class="now-row" style="margin-bottom:0">
-        <div class="k">Question <span id="now-q-cat"></span></div>
-        <textarea id="now-q" maxlength="300"></textarea>
-        <div class="btn-row">
-          <button class="ghost" id="btn-save-q">Save edit</button>
-          <button class="danger" id="btn-veto-q">Veto question</button>
-          <span class="msg" id="now-msg"></span>
-        </div>
+        <div class="k">Quote <span id="now-q-date"></span></div>
+        <div class="v quote" id="now-q">—</div>
+        <div class="sub" id="now-q-attr"></div>
+        <div class="btn-row"><button class="danger" id="btn-veto-q">Veto quote</button></div>
+        <div class="chips" id="vetoed-quotes"></div>
       </div>
     </div>
 
@@ -207,7 +181,6 @@
       <div class="field"><label for="f-screen">Screen</label><select id="f-screen"></select></div>
       <div class="field"><label for="f-refresh" title="How often the panel itself redraws — governs how fresh the temperature is.">Refresh cadence (min)</label><input id="f-refresh" type="number" min="1" max="1440"></div>
       <div class="field"><label for="f-animal-period" title="How often a new engraving is chosen.">Animal cadence (days)</label><input id="f-animal-period" type="number" min="1" max="365"></div>
-      <div class="field"><label for="f-question-period" title="How often a new talking point is chosen.">Question cadence (days)</label><input id="f-question-period" type="number" min="1" max="365"></div>
       <div class="field"><label for="f-tethered">Tethered mode (no deep sleep)</label><input id="f-tethered" type="checkbox"></div>
       <div class="field"><label for="f-poll">Tethered poll (sec)</label><input id="f-poll" type="number" min="5" max="600"></div>
       <div class="field"><label for="f-location">Weather location</label><input id="f-location" type="text" maxlength="60" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:6px 8px;font:inherit"></div>
@@ -296,7 +269,6 @@ async function cycle(what, btn) {
   }
 }
 $('btn-cycle-animal').addEventListener('click', e => cycle('animal', e.target));
-$('btn-cycle-question').addEventListener('click', e => cycle('question', e.target));
 
 $('btn-save').addEventListener('click', async () => {
   const msg = $('save-msg');
@@ -310,7 +282,6 @@ $('btn-save').addEventListener('click', async () => {
         tethered: $('f-tethered').checked,
         tethered_poll_seconds: parseInt($('f-poll').value, 10),
         animal_period_days: parseInt($('f-animal-period').value, 10),
-        question_period_days: parseInt($('f-question-period').value, 10),
         location_name: $('f-location').value,
         latitude: parseFloat($('f-lat').value),
         longitude: parseFloat($('f-lon').value),
@@ -344,9 +315,13 @@ async function api(method, url, body) {
   return j;
 }
 
-// ── Now showing: veto + edit ──
-let nowQDirty = false;
-$('now-q').addEventListener('input', () => { nowQDirty = true; });
+// ── Now showing: veto + restore ──
+function chips(list, kind) {
+  return (list || []).map(n => {
+    const label = n.length > 60 ? n.slice(0, 57) + '…' : n;
+    return `<span class="chip" title="${esc(n)}">${esc(label)}<button data-kind="${kind}" data-restore="${esc(n)}" title="restore">✕</button></span>`;
+  }).join('');
+}
 
 function renderNow(cur) {
   if (!cur) return;
@@ -354,92 +329,35 @@ function renderNow(cur) {
   $('now-animal').textContent = a ? a.common_name : 'none cached yet';
   $('now-animal-sub').textContent = a ? [a.sci_name, a.year, a.artist].filter(Boolean).join(' · ') : '';
   $('btn-veto-animal').disabled = !a;
-  $('vetoed-animals').innerHTML = (cur.vetoed_animals || []).map(n =>
-    `<span class="chip" title="vetoed">${esc(n)}<button data-restore="${esc(n)}" title="restore">✕</button></span>`).join('');
-  $('now-q-cat').textContent = '· ' + cur.question.category;
-  if (!nowQDirty && document.activeElement !== $('now-q')) {
-    $('now-q').value = cur.question.text;
-    $('now-q').dataset.index = cur.question.index;
-  }
+  $('vetoed-animals').innerHTML = chips(cur.vetoed_animals, 'animal');
+  const q = cur.quote;
+  $('now-q').textContent = q ? '“' + q.text + '”' : 'none chosen yet';
+  $('now-q-attr').textContent = q ? '— ' + [q.author, q.work].filter(Boolean).join(', ') + ' (' + q.year + ')' : '';
+  $('now-q-date').textContent = q && q.qotd_date ? '· Wikiquote QOTD ' + q.qotd_date : '';
+  $('btn-veto-q').disabled = !q;
+  $('vetoed-quotes').innerHTML = chips(cur.vetoed_quotes, 'quote');
 }
 
-$('vetoed-animals').addEventListener('click', async e => {
-  const name = e.target.dataset && e.target.dataset.restore; if (!name) return;
-  try { await api('POST', 'api/unveto', {animal: name}); await loadState(); }
-  catch (err) { alert('Restore failed: ' + err.message); }
-});
+document.querySelectorAll('#vetoed-animals, #vetoed-quotes').forEach(el =>
+  el.addEventListener('click', async e => {
+    const b = e.target.closest('button[data-restore]'); if (!b) return;
+    try {
+      await api('POST', 'api/unveto', {[b.dataset.kind]: b.dataset.restore});
+      await loadState();
+    } catch (err) { alert('Restore failed: ' + err.message); }
+  }));
 
 async function veto(what, btn) {
-  if (!confirm(what === 'animal'
-      ? 'Veto this animal? It will be skipped from now on (restorable below).'
-      : 'Veto this question? It is deleted from the bank.')) return;
+  if (!confirm(`Veto this ${what}? It will be skipped from now on (restorable below).`)) return;
   btn.disabled = true;
   try {
     await api('POST', 'api/veto', {what});
-    nowQDirty = false;
-    await loadState(); refreshPreviewImg(); bankLoaded && loadBank();
+    await loadState(); refreshPreviewImg();
   } catch (e) { alert('Veto failed: ' + e.message); }
   finally { btn.disabled = false; }
 }
 $('btn-veto-animal').addEventListener('click', e => veto('animal', e.target));
-$('btn-veto-q').addEventListener('click', e => veto('question', e.target));
-
-$('btn-save-q').addEventListener('click', async () => {
-  const msg = $('now-msg');
-  try {
-    const b = await api('GET', 'api/questions');
-    const i = parseInt($('now-q').dataset.index, 10);
-    if (!(i >= 0 && i < b.questions.length)) throw new Error('bank changed — reload');
-    b.questions[i].text = $('now-q').value;
-    await api('PUT', 'api/questions', {questions: b.questions});
-    nowQDirty = false;
-    flash(msg, 'saved', true);
-    await loadState(); refreshPreviewImg(); bankLoaded && loadBank();
-  } catch (e) { flash(msg, 'failed: ' + e.message, false); }
-});
-
-// ── Question bank editor (loaded on first open) ──
-let bankLoaded = false;
-function bankRow(q, current) {
-  return `<div class="qrow${current ? ' current' : ''}">
-    <input class="qcat" value="${esc(q.category)}" maxlength="40">
-    <textarea maxlength="300">${esc(q.text)}</textarea>
-    <button class="ghost" data-del title="delete">✕</button>
-  </div>`;
-}
-async function loadBank() {
-  const b = await api('GET', 'api/questions');
-  bankLoaded = true;
-  $('bank-count').textContent = `(${b.questions.length}${b.customised ? ', edited' : ''})`;
-  $('bank-list').innerHTML = b.questions.map((q, i) => bankRow(q, i === b.current_index)).join('');
-}
-$('bank-details').addEventListener('toggle', () => { if ($('bank-details').open && !bankLoaded) loadBank(); });
-$('bank-list').addEventListener('click', e => {
-  if (e.target.matches('[data-del]')) e.target.closest('.qrow').remove();
-});
-$('btn-bank-add').addEventListener('click', () => {
-  $('bank-list').insertAdjacentHTML('afterbegin', bankRow({category:'personal', text:''}, false));
-  $('bank-list').querySelector('textarea').focus();
-});
-$('btn-bank-save').addEventListener('click', async () => {
-  const rows = [...document.querySelectorAll('#bank-list .qrow')].map(r => ({
-    category: r.querySelector('.qcat').value, text: r.querySelector('textarea').value}));
-  try {
-    await api('PUT', 'api/questions', {questions: rows});
-    flash($('bank-msg'), 'saved', true);
-    nowQDirty = false;
-    await loadBank(); await loadState(); refreshPreviewImg();
-  } catch (e) { flash($('bank-msg'), 'failed: ' + e.message, false); }
-});
-$('btn-bank-reset').addEventListener('click', async () => {
-  if (!confirm('Discard all edits and vetoes and restore the shipped question bank?')) return;
-  try {
-    await api('DELETE', 'api/questions');
-    flash($('bank-msg'), 'reset', true);
-    nowQDirty = false;
-    await loadBank(); await loadState(); refreshPreviewImg();
-  } catch (e) { flash($('bank-msg'), 'failed: ' + e.message, false); }
-});
+$('btn-veto-q').addEventListener('click', e => veto('quote', e.target));
 
 function renderDeviceBadge(st) {
   const dot = $('dev-dot'), label = $('dev-status');
@@ -475,7 +393,6 @@ function renderState(st) {
   $('f-tethered').checked = st.config.tethered;
   if (focused !== 'f-poll') $('f-poll').value = st.config.tethered_poll_seconds;
   if (focused !== 'f-animal-period') $('f-animal-period').value = st.config.animal_period_days;
-  if (focused !== 'f-question-period') $('f-question-period').value = st.config.question_period_days;
   if (focused !== 'f-location') $('f-location').value = st.config.location_name;
   if (focused !== 'f-lat') $('f-lat').value = st.config.latitude;
   if (focused !== 'f-lon') $('f-lon').value = st.config.longitude;
@@ -489,8 +406,9 @@ function renderState(st) {
   const last = st.last_checkin;
   const stats = [];
   if (last) {
-    stats.push(['Battery', last.battery_voltage != null ? last.battery_voltage.toFixed(2) + ' V' : '—',
-                last.battery_voltage != null && last.battery_voltage < 3.5 ? 'red' : 'green']);
+    const pct = st.battery_percent;
+    stats.push(['Battery', pct != null ? `${pct}% · ${last.battery_voltage.toFixed(2)} V` : '—',
+                pct != null && pct <= 20 ? 'red' : 'green']);
     stats.push(['Wi-Fi RSSI', last.rssi != null ? last.rssi + ' dBm' : '—', 'blue']);
     stats.push(['Boot count', last.boot_count ?? '—', '']);
     stats.push(['Shown version', last.shown_version ?? '—',

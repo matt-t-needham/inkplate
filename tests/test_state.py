@@ -65,3 +65,15 @@ def test_snow_config_validation(data_dir):
     assert (cfg["show_snow"], cfg["snow_location_name"]) == (False, "Timberline")
     with pytest.raises(ValueError):
         state.update_config(snow_latitude=95)
+
+
+def test_battery_percent_curve():
+    import state
+    assert state.battery_percent(4.25) == 100
+    assert state.battery_percent(4.20) == 100
+    assert state.battery_percent(3.75) == 50
+    assert state.battery_percent(3.775) == 55
+    assert state.battery_percent(3.20) == 0
+    assert state.battery_percent(None) is None
+    assert state.battery_percent("junk") is None
+    assert state.battery_percent(0.0) is None   # ADC not wired / no battery
