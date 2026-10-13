@@ -1,11 +1,15 @@
-"""Screen registry — each screen is a function that draws a 1600x1200 RGB frame.
+"""Screen registry — each screen is a function that draws an RGB frame.
 
 Extension point: write a function that takes (width, height) and returns a PIL
 RGB image, add it to SCREENS, and it appears in the control pane's picker.
+Screens are size-agnostic: the renderer asks for 1600x1200 when the panel
+hangs landscape and 1200x1600 when it is rotated to portrait (it turns the
+finished frame back to the panel's native orientation itself).
 
 Screens:
-- dashboard       — the real thing: weather, daily talking point, daily
-                    1800s animal engraving, optional rage.bix now-playing
+- dashboard       — the real thing: weather, daily 1800s animal engraving,
+                    seasonal snow report, optional rage.bix now-playing and
+                    daily quote; its own portrait layout when taller than wide
 - placeholder     — proves the whole pipeline end to end
 - palette_test    — six solid color bands; verifies color mapping on the panel
 - dither_test     — gradients; judges dither quality
@@ -351,193 +355,329 @@ def _sun_horizon(d: ImageDraw.ImageDraw, x: int, y: int, size: int, rising: bool
     return _glyph(d, x, y, size, WI_SUNRISE if rising else WI_SUNSET, ICON_INK)
 
 
+# ── dashboard ─────────────────────────────────────────────────────────────────
+# One set of widgets, two orientations. Every widget takes the draw context
+# plus the X/Y scalers, so the same code lays out a 1600x1200 landscape frame
+# and a 1200x1600 portrait one (the panel hung on its side — renderer turns
+# the finished frame back to the panel's native orientation, the device never
+# knows). Portrait has two arrangements, picked in the pane:
+#
+#   stack — weather top-left, caption top-right, the engraving fills the lower
+#           two thirds; snow report bottom-left over the art's faded edge.
+#   hero  — the engraving fills the top two thirds and bleeds off the top and
+#           right; weather, caption and snow share a band along the bottom.
+
+LANDSCAPE = (1600, 1200)   # layout coordinates; renders scale from these
+PORTRAIT = (1200, 1600)
+
+PORTRAIT_LAYOUTS = ("stack", "hero")
+DEFAULT_PORTRAIT_LAYOUT = "stack"
+
+WEATHER_BLOCK_H = 440      # top of the glyph row to the bottom of the °F line
+# Portrait: the weather's first row (glyph · 21° · HIGH 28°) reaches x≈920 of
+# 1200, so the caption can't share that row as it does in landscape — it
+# tucks under the HIGH temperature instead, right-aligned.
+PORTRAIT_CAPTION_TOP = 196
+# Hero band: weather on the left; caption and (when on) the snow report
+# stacked on the right under the HIGH column, which needs a taller band.
+HERO_BAND_H = WEATHER_BLOCK_H
+HERO_BAND_H_SNOW = 540
+
+
+def _dashboard_data(cfg: dict) -> dict:
+    """Every source the dashboard draws from, each independently optional."""
+    return {
+        "weather": datasources.get_weather(cfg["latitude"], cfg["longitude"]),
+        "animal": datasources.get_animal(offset=cfg["animal_offset"],
+                                         period_days=cfg["animal_period_days"],
+                                         vetoed=cfg["vetoed_animals"]),
+        "now_playing": datasources.get_now_playing() if cfg["show_now_playing"] else None,
+        "snow": (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
+                 if cfg["show_snow"] else None),
+        # Off by default: the quote is kept (fetcher, vetoes, pane card) but
+        # not drawn, so the engraving gets the room instead.
+        "quote": (quotes.get_quote(date.today(), fits=quote_fits,
+                                   vetoed=cfg["vetoed_quotes"])
+                  if cfg.get("show_quote") else None),
+    }
+
+
 def dashboard(width: int, height: int) -> Image.Image:
     """Minimal dashboard. The daily engraving is a soft, edge-faded background
-    bleeding off the bottom-right corner; weather sits top-left; the daily
-    quote runs along the bottom border; source caption top-right. Display
-    type is Michroma (the rage channel font), the quote is serif italic.
-    Every widget degrades independently — a dead API never blanks the panel."""
+    bleeding off the right border; weather sits top-left; source caption
+    top-right; the snow report (seasonal) and the quote (off by default) along
+    the bottom. Display type is Michroma (the rage channel font), the caption
+    and quote are serif italic. Every widget degrades independently — a dead
+    API never blanks the panel. Taller than wide means the panel is hung
+    vertically and the portrait layout is used."""
     # Lazy import: state imports screens (for DEFAULT_SCREEN), so importing
     # state at module top would be circular. At call time it's fully loaded.
     import state
     cfg = state.load_config()
+    data = _dashboard_data(cfg)
+    if height > width:
+        return _dashboard_portrait(width, height, cfg, data,
+                                   layout=cfg.get("portrait_layout"))
+    return _dashboard_landscape(width, height, cfg, data)
 
-    weather = datasources.get_weather(cfg["latitude"], cfg["longitude"])
-    animal = datasources.get_animal(offset=cfg["animal_offset"],
-                                    period_days=cfg["animal_period_days"],
-                                    vetoed=cfg["vetoed_animals"])
-    now_playing = datasources.get_now_playing() if cfg["show_now_playing"] else None
-    snow = (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
-            if cfg["show_snow"] else None)
-    quote = quotes.get_quote(date.today(), fits=quote_fits, vetoed=cfg["vetoed_quotes"])
 
+def _scalers(width: int, height: int, base: tuple[int, int]):
+    sx, sy = width / base[0], height / base[1]
+    return (lambda v: int(v * sx)), (lambda v: int(v * sy))
+
+
+def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict) -> Image.Image:
     img = Image.new("RGB", (width, height), WHITE)
-    sx = width / 1600  # layout is 1600x1200-based; scales for small test renders
-    sy = height / 1200
+    X, Y = _scalers(width, height, LANDSCAPE)
+    halo = dict(stroke_width=max(2, Y(4)), stroke_fill=WHITE)   # text over art
 
-    def X(v):
-        return int(v * sx)
-
-    def Y(v):
-        return int(v * sy)
-
-    # White halo behind text that sits over the artwork.
-    halo = dict(stroke_width=max(2, Y(4)), stroke_fill=WHITE)
-
-    # ── background: the engraving, fitted into a fixed art box ───────────────
-    # The box is defined in panel coordinates, not derived from the image, so
-    # every plate lands in the same place whatever its dimensions. Its top and
-    # bottom are safe areas: the caption sits above it, the talking point
-    # below. A figure is contained (never cut), a scene covers the box; either
-    # way the last ART_BLEED of the artwork runs off the right border.
-    # Nearly the full height of the right-hand side: the caption clears the
-    # top, and the talking point only occupies the lower *left*, so the art
-    # may run past it — its left edge is inside the fade by then.
-    bx0, by0 = X(560), Y(150)
-    bw, bh = X(1600) - bx0, Y(1150) - by0
-
-    drew_art = False
-    if animal:
-        try:
-            art, is_scene = _prep_engraving(Image.open(animal["path"]).convert("RGB"))
-            fit = max if is_scene else min
-            scale = fit(bw / art.width, bh / art.height)
-            art = art.resize((max(1, round(art.width * scale)),
-                              max(1, round(art.height * scale))), Image.LANCZOS)
-            if is_scene:   # cover: trim the overflow around the centre
-                ox, oy = (art.width - bw) // 2, (art.height - bh) // 2
-                art = art.crop((max(0, ox), max(0, oy),
-                                max(0, ox) + min(bw, art.width),
-                                max(0, oy) + min(bh, art.height)))
-            # Fade widths are fixed on the panel, not a share of the image —
-            # otherwise a small plate fades over a few pixels and a large one
-            # over hundreds, which is what made the peacock dissolve early.
-            mask = _edge_fade_mask(
-                art.width, art.height,
-                left=min(0.45, X(ART_FADE_LEFT) / art.width), right=0.0,
-                top=min(0.45, Y(ART_FADE_EDGE) / art.height),
-                bottom=min(0.45, Y(ART_FADE_EDGE) / art.height))
-            img.paste(art, (width - round(art.width * (1 - ART_BLEED)),
-                            by0 + (bh - art.height) // 2), mask)
-            drew_art = True
-        except OSError:
-            drew_art = False
+    # Fixed art box in panel coordinates (see _draw_art). The caption clears
+    # the top; the weather only occupies the upper left, so the box reaches
+    # under it — a wide plate's left edge is inside the fade by then. With the
+    # quote off the box runs to the bottom border and further left.
+    if data["quote"]:
+        box = (X(560), Y(150), width, Y(1150))
+    else:
+        box = (X(440), Y(140), width, height)
+    drew_art = _draw_art(img, data["animal"], box, X, Y)
 
     d = ImageDraw.Draw(img)
+    n = _draw_caption(d, data["animal"] if drew_art else None,
+                      width - X(48), Y(36), X, Y, halo)
+    _draw_now_playing(d, data["now_playing"], width - X(48),
+                      Y(36) + Y(34) * n + Y(12), X, Y, halo)
+    _draw_weather(d, data["weather"], X(52), Y(44), X, Y, halo)
 
-    # ── caption, top-right: "Rhinoceros · Rhinoceros unicornis /
-    #    of South Asia · as depicted by Conrad Gessner, Zürich, 1551" ─────────
-    cap_lines = []
-    if drew_art:
-        line1 = animal.get("common_name", "?").capitalize()
-        if animal.get("sci_name"):
-            line1 += f" · {animal['sci_name']}"
-        artist, place, year = (animal.get("artist"), animal.get("place"),
-                               animal.get("year"))
-        if artist:
-            clause = f"as depicted by {artist}" + (f", {place}" if place else "")
-        elif place:
-            clause = f"as depicted in {place}"
-        else:
-            clause = "drawn" if year else None
-        if clause and year:
-            clause += f", {year}"
-        # One idea per line ("of the Cascades" / "as depicted by …"), wrapped
-        # narrow enough to stay clear of the weather block's HIGH column.
-        rest = [f"of {animal['native']}" if animal.get("native") else None, clause]
-        f_cap = _font(Y(26), style="serif_italic")
-        cap_lines = []
-        for part in [line1] + [r for r in rest if r]:
-            cap_lines += _wrap(d, part, f_cap, X(CAPTION_WIDTH))
-        cap_lines = cap_lines[:4]
-        cy = Y(36)
-        for ln in cap_lines:
-            d.text((width - X(48) - d.textlength(ln, font=f_cap), cy),
-                   ln, font=f_cap, fill=BLACK, **halo)
-            cy += Y(34)
-
-    # ── now playing, under the caption ────────────────────────────────────────
-    if now_playing and (now_playing.get("artist") or now_playing.get("song")):
-        yr = f" ({now_playing['year']})" if now_playing.get("year") else ""
-        txt = f"{now_playing.get('artist', '?')} — {now_playing.get('song', '?')}{yr}"
-        f_np = _font(Y(24), style="display")
-        while d.textlength(txt, font=f_np) > X(700) and len(txt) > 4:
-            txt = txt[:-4] + "…"
-        ny = Y(36) + Y(34) * len(cap_lines) + Y(12)
-        tx = width - X(48) - d.textlength(txt, font=f_np)
-        d.polygon([(tx - X(32), ny + Y(3)), (tx - X(32), ny + Y(23)),
-                   (tx - X(13), ny + Y(13))], fill=GREEN)
-        d.text((tx, ny), txt, font=f_np, fill=BLACK, **halo)
-
-    # ── weather, top-left, everything flush to one left edge: today's
-    #    forecast glyph (what the day will do — the window shows what it's
-    #    doing now) beside the current temperature and today's high; sunrise/
-    #    sunset; then the next two days ──────────────────────────────────────
-    LX = X(52)
-    if weather and weather.get("days"):
-        today = weather["days"][0]
-        kind = datasources.icon_kind(today["code"])
-        icon_r = Y(62)
-        icon_w = _weather_icon_width(d, icon_r, kind)
-        _weather_icon(d, LX + icon_w // 2, Y(132), icon_r, kind)
-        x = LX + icon_w + X(28)
-        x += _temp_cf(d, x, Y(44), weather["current_c"], Y(130), BLACK, halo) + X(46)
-        f_lab = _font(Y(20), style="display")
-        d.text((x, Y(62)), "HIGH", font=f_lab, fill=BLACK, **halo)
-        _temp_cf(d, x, Y(92), today["tmax"], Y(64), RED, halo)
-
-        f_t = _font(Y(30), style="display")
-        gsz = Y(60)
-        gw = _glyph_width(d, WI_SUNRISE, gsz)
-        x = LX
-        for txt, rising in ((_hhmm(today["sunrise"]), True),
-                            (_hhmm(today["sunset"]), False)):
-            _sun_horizon(d, x + gw // 2, Y(266), gsz, rising)
-            d.text((x + gw + X(10), Y(250)), txt, font=f_t, fill=BLACK, **halo)
-            x += gw + X(10) + d.textlength(txt, font=f_t) + X(44)
-
-        f_day = _font(Y(28), style="display")
-        for i, day in enumerate(weather["days"][1:3]):
-            cx0 = LX + i * X(256)
-            dk = datasources.icon_kind(day["code"])
-            iw = _weather_icon_width(d, Y(30), dk)
-            _weather_icon(d, cx0 + iw // 2, Y(356), Y(30), dk)
-            d.text((cx0 + iw + X(12), Y(340)), _dow(day["date"]), font=f_day,
-                   fill=BLACK, **halo)
-            # Low then high, both units.
-            lo, hi = str(round(day["tmin"])), str(round(day["tmax"]))
-            w_lo = _deg(d, cx0, Y(396), lo, Y(38), BLUE, halo=halo)
-            _deg(d, cx0 + w_lo + X(18), Y(396), hi, Y(38), RED, halo=halo)
-            d.text((cx0, Y(452)),
-                   f"{_c_to_f(day['tmin'])} / {_c_to_f(day['tmax'])} °F",
-                   font=_font(Y(22)), fill=BLACK, **halo)
-    else:
-        d.text((LX, Y(100)), "weather unavailable",
-               font=_font(Y(40), style="display"), fill=RED, **halo)
-
-    # ── quote along the bottom border, attribution beneath; the snow report
-    #    (when on) stacks directly above it ──────────────────────────────────
-    qtop = height - Y(52)
-    if quote:
-        f_q = _font(Y(QUOTE_SIZE), style="serif_italic")
-        f_a = _font(Y(24))
-        qlines = _wrap(d, f"“{quote['text']}”", f_q, X(QUOTE_WIDTH))[:QUOTE_MAX_LINES]
-        attr = quote_attribution(quote)
-        if d.textlength(attr, font=f_a) > X(QUOTE_WIDTH):
-            attr = quote_attribution(quote, with_work=False)
-        line_h = Y(54)
-        qtop = height - Y(52) - Y(36) - line_h * len(qlines)
-        qy = qtop
-        for ln in qlines:
-            d.text((LX, qy), ln, font=f_q, fill=BLACK, **halo)
-            qy += line_h
-        d.text((LX, qy + Y(6)), attr, font=f_a, fill=BLACK, **halo)
-
-    if snow:
-        _snow_report(d, LX, qtop - Y(40), snow, X, Y, halo,
+    bottom = height - Y(52)
+    if data["quote"]:
+        bottom = _draw_quote(d, data["quote"], X(52), bottom, X, Y, halo) - Y(40)
+    if data["snow"]:
+        _snow_report(d, X(52), bottom, data["snow"], X, Y, halo,
                      name=cfg["snow_location_name"])
-
     return img
+
+
+def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
+                        layout: str | None = None) -> Image.Image:
+    layout = layout if layout in PORTRAIT_LAYOUTS else DEFAULT_PORTRAIT_LAYOUT
+    img = Image.new("RGB", (width, height), WHITE)
+    X, Y = _scalers(width, height, PORTRAIT)
+    halo = dict(stroke_width=max(2, Y(4)), stroke_fill=WHITE)
+    LX = X(52)
+    right = width - X(48)
+
+    if layout == "hero":
+        # Bottom band first (it sets how much room the art gets above it).
+        band_bottom = height - Y(52)
+        if data["quote"]:
+            band_bottom = _draw_quote(ImageDraw.Draw(img), data["quote"], LX,
+                                      band_bottom, X, Y, halo) - Y(40)
+        band_top = band_bottom - Y(HERO_BAND_H_SNOW if data["snow"] else HERO_BAND_H)
+        drew_art = _draw_art(img, data["animal"], (0, 0, width, band_top - Y(40)),
+                             X, Y, valign="hero")
+        d = ImageDraw.Draw(img)
+        _draw_weather(d, data["weather"], LX, band_top, X, Y, halo)
+        cap_top = band_top + Y(PORTRAIT_CAPTION_TOP - 44)
+        n = _draw_caption(d, data["animal"] if drew_art else None, right,
+                          cap_top, X, Y, halo)
+        _draw_now_playing(d, data["now_playing"], right,
+                          cap_top + Y(34) * n + Y(12), X, Y, halo)
+        if data["snow"]:
+            _snow_report(d, X(560), band_bottom, data["snow"], X, Y, halo,
+                         name=cfg["snow_location_name"])
+        return img
+
+    # stack: the landscape arrangement folded — info on top, art below.
+    drew_art = _draw_art(img, data["animal"], (0, Y(500), width, height), X, Y)
+    d = ImageDraw.Draw(img)
+    n = _draw_caption(d, data["animal"] if drew_art else None, right,
+                      Y(PORTRAIT_CAPTION_TOP), X, Y, halo)
+    _draw_now_playing(d, data["now_playing"], right,
+                      Y(PORTRAIT_CAPTION_TOP) + Y(34) * n + Y(12), X, Y, halo)
+    _draw_weather(d, data["weather"], LX, Y(44), X, Y, halo)
+
+    bottom = height - Y(52)
+    if data["quote"]:
+        bottom = _draw_quote(d, data["quote"], LX, bottom, X, Y, halo) - Y(40)
+    if data["snow"]:
+        _snow_report(d, LX, bottom, data["snow"], X, Y, halo,
+                     name=cfg["snow_location_name"])
+    return img
+
+
+# ── dashboard widgets ─────────────────────────────────────────────────────────
+
+def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
+              valign: str = "center") -> bool:
+    """The engraving, fitted into a fixed art box (x0, y0, x1, y1) in frame
+    pixels. The box is defined in panel coordinates, not derived from the
+    image, so every plate lands in the same place whatever its dimensions.
+    A figure is contained (never cut), a scene covers the box; either way the
+    art is anchored to the box's right edge with the last ART_BLEED of it
+    running off the frame. valign "center" centres it in the box; "hero"
+    (the portrait hero layout) anchors a plate that fills the box's height
+    to the top edge the same way, bleeding off it, and sits a wide one on the
+    box's bottom edge so it meets the info band instead of floating.
+    Returns True if something was drawn."""
+    if not animal:
+        return False
+    bx0, by0, bx1, by1 = box
+    bw, bh = bx1 - bx0, by1 - by0
+    try:
+        art, is_scene = _prep_engraving(Image.open(animal["path"]).convert("RGB"))
+    except OSError:
+        return False
+    fit = max if is_scene else min
+    scale = fit(bw / art.width, bh / art.height)
+    fills_height = is_scene or bh / art.height <= bw / art.width
+    bleed_top = valign == "hero" and fills_height
+    art = art.resize((max(1, round(art.width * scale)),
+                      max(1, round(art.height * scale))), Image.LANCZOS)
+    if is_scene:   # cover: trim the overflow around the centre
+        ox, oy = (art.width - bw) // 2, (art.height - bh) // 2
+        art = art.crop((max(0, ox), max(0, oy),
+                        max(0, ox) + min(bw, art.width),
+                        max(0, oy) + min(bh, art.height)))
+    # Fade widths are fixed on the panel, not a share of the image —
+    # otherwise a small plate fades over a few pixels and a large one
+    # over hundreds, which is what made the peacock dissolve early.
+    edge = min(0.45, Y(ART_FADE_EDGE) / art.height)
+    mask = _edge_fade_mask(
+        art.width, art.height,
+        left=min(0.45, X(ART_FADE_LEFT) / art.width), right=0.0,
+        top=0.0 if bleed_top else edge, bottom=edge)
+    x = bx1 - round(art.width * (1 - ART_BLEED))
+    if bleed_top:
+        y = by0 - round(art.height * ART_BLEED)
+    elif valign == "hero":
+        y = by1 - art.height
+    else:
+        y = by0 + (bh - art.height) // 2
+    img.paste(art, (x, y), mask)
+    return True
+
+
+def _draw_caption(d: ImageDraw.ImageDraw, animal: dict | None, right: int, top: int,
+                  X, Y, halo, max_w: int | None = None, max_lines: int = 4) -> int:
+    """Right-aligned source caption: "Rhinoceros · Rhinoceros unicornis /
+    of South Asia / as depicted by Conrad Gessner, Zürich, 1551". One idea
+    per line, wrapped narrow enough to stay clear of the weather block's HIGH
+    column. Returns the number of lines drawn."""
+    if not animal:
+        return 0
+    line1 = animal.get("common_name", "?").capitalize()
+    if animal.get("sci_name"):
+        line1 += f" · {animal['sci_name']}"
+    artist, place, year = (animal.get("artist"), animal.get("place"),
+                           animal.get("year"))
+    if artist:
+        clause = f"as depicted by {artist}" + (f", {place}" if place else "")
+    elif place:
+        clause = f"as depicted in {place}"
+    else:
+        clause = "drawn" if year else None
+    if clause and year:
+        clause += f", {year}"
+    rest = [f"of {animal['native']}" if animal.get("native") else None, clause]
+    f_cap = _font(Y(26), style="serif_italic")
+    lines = []
+    for part in [line1] + [r for r in rest if r]:
+        lines += _wrap(d, part, f_cap, max_w or X(CAPTION_WIDTH))
+    lines = lines[:max_lines]
+    cy = top
+    for ln in lines:
+        d.text((right - d.textlength(ln, font=f_cap), cy), ln, font=f_cap,
+               fill=BLACK, **halo)
+        cy += Y(34)
+    return len(lines)
+
+
+def _draw_now_playing(d: ImageDraw.ImageDraw, now_playing: dict | None, right: int,
+                      top: int, X, Y, halo) -> None:
+    """"Artist — Song (Year)" behind a green play triangle, right-aligned."""
+    if not (now_playing and (now_playing.get("artist") or now_playing.get("song"))):
+        return
+    yr = f" ({now_playing['year']})" if now_playing.get("year") else ""
+    txt = f"{now_playing.get('artist', '?')} — {now_playing.get('song', '?')}{yr}"
+    f_np = _font(Y(24), style="display")
+    while d.textlength(txt, font=f_np) > X(700) and len(txt) > 4:
+        txt = txt[:-4] + "…"
+    tx = right - d.textlength(txt, font=f_np)
+    d.polygon([(tx - X(32), top + Y(3)), (tx - X(32), top + Y(23)),
+               (tx - X(13), top + Y(13))], fill=GREEN)
+    d.text((tx, top), txt, font=f_np, fill=BLACK, **halo)
+
+
+def _draw_weather(d: ImageDraw.ImageDraw, weather: dict | None, LX: int, top: int,
+                  X, Y, halo) -> None:
+    """Everything flush to one left edge: today's forecast glyph (what the
+    day will do — the window shows what it's doing now) beside the current
+    temperature and today's high; sunrise/sunset; then the next two days.
+    `top` is the top of the temperature; the block is WEATHER_BLOCK_H tall."""
+    def P(v):   # layout rows were drawn at absolute panel y's from 44 down
+        return top + Y(v - 44)
+
+    if not (weather and weather.get("days")):
+        d.text((LX, P(100)), "weather unavailable",
+               font=_font(Y(40), style="display"), fill=RED, **halo)
+        return
+    today = weather["days"][0]
+    kind = datasources.icon_kind(today["code"])
+    icon_r = Y(62)
+    icon_w = _weather_icon_width(d, icon_r, kind)
+    _weather_icon(d, LX + icon_w // 2, P(132), icon_r, kind)
+    x = LX + icon_w + X(28)
+    x += _temp_cf(d, x, P(44), weather["current_c"], Y(130), BLACK, halo) + X(46)
+    f_lab = _font(Y(20), style="display")
+    d.text((x, P(62)), "HIGH", font=f_lab, fill=BLACK, **halo)
+    _temp_cf(d, x, P(92), today["tmax"], Y(64), RED, halo)
+
+    f_t = _font(Y(30), style="display")
+    gsz = Y(60)
+    gw = _glyph_width(d, WI_SUNRISE, gsz)
+    x = LX
+    for txt, rising in ((_hhmm(today["sunrise"]), True),
+                        (_hhmm(today["sunset"]), False)):
+        _sun_horizon(d, x + gw // 2, P(266), gsz, rising)
+        d.text((x + gw + X(10), P(250)), txt, font=f_t, fill=BLACK, **halo)
+        x += gw + X(10) + d.textlength(txt, font=f_t) + X(44)
+
+    f_day = _font(Y(28), style="display")
+    for i, day in enumerate(weather["days"][1:3]):
+        cx0 = LX + i * X(256)
+        dk = datasources.icon_kind(day["code"])
+        iw = _weather_icon_width(d, Y(30), dk)
+        _weather_icon(d, cx0 + iw // 2, P(356), Y(30), dk)
+        d.text((cx0 + iw + X(12), P(340)), _dow(day["date"]), font=f_day,
+               fill=BLACK, **halo)
+        # Low then high, both units.
+        lo, hi = str(round(day["tmin"])), str(round(day["tmax"]))
+        w_lo = _deg(d, cx0, P(396), lo, Y(38), BLUE, halo=halo)
+        _deg(d, cx0 + w_lo + X(18), P(396), hi, Y(38), RED, halo=halo)
+        d.text((cx0, P(452)),
+               f"{_c_to_f(day['tmin'])} / {_c_to_f(day['tmax'])} °F",
+               font=_font(Y(22)), fill=BLACK, **halo)
+
+
+def _draw_quote(d: ImageDraw.ImageDraw, quote: dict, LX: int, bottom: int,
+                X, Y, halo) -> int:
+    """Quote in serif italic with the attribution line beneath, its last
+    line ending at `bottom`. Returns the y of its top edge, so whatever
+    stacks above it (the snow report) can sit just clear."""
+    f_q = _font(Y(QUOTE_SIZE), style="serif_italic")
+    f_a = _font(Y(24))
+    qlines = _wrap(d, f"“{quote['text']}”", f_q, X(QUOTE_WIDTH))[:QUOTE_MAX_LINES]
+    attr = quote_attribution(quote)
+    if d.textlength(attr, font=f_a) > X(QUOTE_WIDTH):
+        attr = quote_attribution(quote, with_work=False)
+    line_h = Y(54)
+    qtop = bottom - Y(36) - line_h * len(qlines)
+    qy = qtop
+    for ln in qlines:
+        d.text((LX, qy), ln, font=f_q, fill=BLACK, **halo)
+        qy += line_h
+    d.text((LX, qy + Y(6)), attr, font=f_a, fill=BLACK, **halo)
+    return qtop
 
 
 # ── dashboard helpers: quote, temperatures, snow report ──────────────────────

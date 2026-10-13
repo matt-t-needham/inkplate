@@ -20,11 +20,20 @@ log = logging.getLogger("inkplate.state")
 
 _lock = threading.Lock()
 
+ROTATIONS = (0, 90, 180, 270)
+
 DEFAULT_CONFIG = {
     # How long the device deep-sleeps between refreshes.
     "refresh_minutes": config.DEFAULT_REFRESH_MINUTES,
     # Which screen renderer produces the frame (key into screens.SCREENS).
     "screen": screens.DEFAULT_SCREEN,
+    # How the panel is hung: degrees it is turned clockwise from its native
+    # landscape. 90/270 render the screen portrait (1200x1600) and the
+    # renderer turns the frame back, so the device always receives 1600x1200
+    # and the firmware never knows. 90 = cable edge now on the left.
+    "rotation": 0,
+    # Which portrait arrangement to use when rotated (screens.PORTRAIT_LAYOUTS).
+    "portrait_layout": screens.DEFAULT_PORTRAIT_LAYOUT,
     # Tethered mode: device skips deep sleep and polls fast. For bring-up.
     "tethered": False,
     "tethered_poll_seconds": config.DEFAULT_TETHERED_POLL_SECONDS,
@@ -49,6 +58,10 @@ DEFAULT_CONFIG = {
     "animal_period_days": 1,
     # Common names of animals vetoed from the pane — skipped by the rotation.
     "vetoed_animals": [],
+    # Draw the daily quote along the bottom border. Off: the fetcher, vetoes
+    # and pane card stay, the panel just doesn't show it and the engraving
+    # takes the room.
+    "show_quote": False,
     # Quote texts vetoed from the pane — never shown again (matched by
     # quotes.key, so punctuation/case differences don't matter).
     "vetoed_quotes": [],
@@ -83,6 +96,10 @@ def load_config() -> dict:
     if cfg["screen"] not in screens.SCREENS:
         log.warning("configured screen %r no longer exists, falling back", cfg["screen"])
         cfg["screen"] = screens.DEFAULT_SCREEN
+    if cfg["rotation"] not in ROTATIONS:
+        cfg["rotation"] = 0
+    if cfg["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
+        cfg["portrait_layout"] = screens.DEFAULT_PORTRAIT_LAYOUT
     return cfg
 
 
@@ -101,6 +118,17 @@ def update_config(**changes) -> dict:
         if changes["screen"] not in screens.SCREENS:
             raise ValueError(f"unknown screen: {changes['screen']}")
         cfg["screen"] = changes["screen"]
+    if "rotation" in changes:
+        v = int(changes["rotation"])
+        if v not in ROTATIONS:
+            raise ValueError("rotation must be 0, 90, 180 or 270")
+        cfg["rotation"] = v
+    if "portrait_layout" in changes:
+        if changes["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
+            raise ValueError(f"unknown portrait layout: {changes['portrait_layout']}")
+        cfg["portrait_layout"] = changes["portrait_layout"]
+    if "show_quote" in changes:
+        cfg["show_quote"] = bool(changes["show_quote"])
     if "tethered" in changes:
         cfg["tethered"] = bool(changes["tethered"])
     if "tethered_poll_seconds" in changes:

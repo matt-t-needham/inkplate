@@ -180,6 +180,48 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 21. Rotation on the server, portrait layouts, quote off (2026-10-13)
+**Rotation is a config value, not a firmware one.** The panel can hang
+vertically (`rotation` = its clockwise turn from landscape: 0/90/180/270).
+The screen is drawn upright at the swapped size (1200×1600), the three pane
+previews stay upright, and only the device frame (`render/frame.png`) is
+turned back to native 1600×1200 before it is saved. The device protocol is
+untouched and the firmware never learns about orientation — which matters
+because the sketch is unverified on hardware and every contract change is a
+reflash. The frame is what gets hashed, so turning the panel bumps the
+version and forces the redraw it needs. PIL's `rotate()` is anticlockwise;
+turning the upright image by the panel's clockwise angle is the inverse the
+frame needs (a `(0,0)` mark lands bottom-left in the frame for 90°, which is
+where the native top-left corner goes when the panel turns clockwise).
+
+**Two portrait arrangements, picked in the pane** (`portrait_layout`), so
+they can be compared on the wall rather than argued about from mockups:
+- *stack* (default): the landscape arrangement folded — weather top-left,
+  caption top-right, engraving across the lower two thirds, snow bottom-left
+  over the art's faded edge.
+- *hero*: the engraving fills the top and bleeds off the top edge the way it
+  bleeds off the right in landscape; weather, caption and snow share a band
+  along the bottom. A wide plate sits on the band instead of being top-bled
+  (it would float otherwise). The band grows from 440 to 540 px when the
+  snow report is on — the only way to fit caption and snow in the right
+  column without overlap.
+
+One portrait-specific rule: in a 1200 px-wide frame the weather's first row
+(glyph · 21° · HIGH 28°) reaches x≈920, so the caption cannot share that row
+as it does in landscape. It tucks under the HIGH temperature instead
+(`PORTRAIT_CAPTION_TOP`). The first mockups had it colliding with the HIGH.
+
+**Quote off by default, not removed** (`show_quote`). Matt wanted the clutter
+gone; the fetcher, the no-repeat history, vetoes and the pane card stay so it
+can come back with one checkbox. With it off the art box in landscape grows
+from (560,150)–(1600,1150) to (440,140)–(1600,1200): a tall plate gains ~6%
+height, a wide one ~11% width, and the engraving now runs to the bottom
+border. The quote is not fetched while hidden, so Wikiquote sees no traffic.
+
+Layout previews live in `docs/layouts/` — rendered with *synthetic* plates
+(a hatched heron and crocodile drawn in code) because Commons was blocked
+from the sandbox they were made in; they show placement, not real art.
+
 ## 20g. Standardising wildly different plates (tenth pass)
 Plates arrive at 6× the spread in subject aspect ratio (0.26 for a seahorse,
 1.53 for a crocodile), some are isolated figures on blank paper, some are

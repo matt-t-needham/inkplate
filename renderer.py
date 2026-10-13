@@ -7,9 +7,19 @@ device wake never waits on a render.
 
 Files written per render (atomically, tmp + replace):
   render/raw.png       — full-color RGB frame (control-pane "raw" preview)
-  render/dithered.png  — indexed 6-color PNG (what the device downloads)
+  render/dithered.png  — indexed 6-color PNG (control-pane "dithered" preview)
   render/panel.png     — muted-palette simulation (control-pane preview)
-  render/meta.json     — {rendered_at, screen, image_version, render_ms}
+  render/frame.png     — dithered.png turned to the panel's native 1600x1200
+                         orientation: what the device downloads
+  render/meta.json     — {rendered_at, screen, rotation, image_version, render_ms}
+
+Rotation: the screen is drawn upright at whatever size the hanging calls for
+(1200x1600 when the panel is on its side) and the three previews stay upright
+— they show what is on the wall. Only frame.png is turned, by the configured
+rotation, so the firmware always receives a native-orientation frame and the
+device protocol is untouched. config.rotation is the panel's clockwise turn
+from landscape; PIL's rotate() is anticlockwise, so rotating the upright
+image by that same angle is what puts it right when the panel is turned.
 """
 
 import hashlib
@@ -55,21 +65,25 @@ def render(force_new_version: bool = False) -> dict:
     """
     cfg = state.load_config()
     screen_name = cfg["screen"]
+    rotation = cfg["rotation"]
     t0 = time.monotonic()
 
-    img = screens.SCREENS[screen_name](config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
+    img = screens.SCREENS[screen_name](*upright_size(rotation))
     dithered = palette.dither_to_spectra(img)
     panel = palette.simulate_panel(dithered)
+    frame = to_panel_frame(dithered, rotation)
 
     out = _render_dir()
     out.mkdir(parents=True, exist_ok=True)
     _save_png(img, out / "raw.png")
     _save_png(dithered, out / "dithered.png")
     _save_png(panel, out / "panel.png")
+    _save_png(frame, out / "frame.png")
 
     # Hash the raw pixel buffer, not the PNG bytes — encoder settings can't
-    # cause false "changed" verdicts that way.
-    content_hash = hashlib.sha256(dithered.tobytes()).hexdigest()
+    # cause false "changed" verdicts that way. The device frame, so a
+    # rotation change (same pixels, turned) is a version bump too.
+    content_hash = hashlib.sha256(frame.tobytes()).hexdigest()
     prev = meta()
     changed = prev is None or prev.get("content_hash") != content_hash
     if force_new_version or changed:
@@ -79,6 +93,7 @@ def render(force_new_version: bool = False) -> dict:
     m = {
         "rendered_at": time.time(),
         "screen": screen_name,
+        "rotation": rotation,
         "image_version": cfg["image_version"],
         "content_hash": content_hash,
         "render_ms": render_ms,
@@ -107,8 +122,9 @@ def ensure_fresh() -> dict:
     stale = (
         m is None
         or m.get("screen") != cfg["screen"]
+        or m.get("rotation", 0) != cfg["rotation"]
         or (time.time() - m.get("rendered_at", 0)) > ttl_s
-        or not (_render_dir() / "dithered.png").exists()
+        or not dithered_path().exists()
     )
     if stale:
         try:
@@ -116,14 +132,31 @@ def ensure_fresh() -> dict:
         except Exception as e:
             log.error("render failed: %s", e, exc_info=True)
             state.log_event("error", f"render failed: {e}")
-            if m is not None and (_render_dir() / "dithered.png").exists():
+            if m is not None and dithered_path().exists():
                 return m  # serve the stale frame rather than nothing
             raise
     return m
 
 
+def upright_size(rotation: int) -> tuple[int, int]:
+    """Frame size the screen is drawn at: the panel's own size, with width
+    and height swapped when it hangs on its side."""
+    if rotation in (90, 270):
+        return config.DISPLAY_HEIGHT, config.DISPLAY_WIDTH
+    return config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT
+
+
+def to_panel_frame(img, rotation: int):
+    """Turn an upright frame into the panel's native orientation. Lossless
+    for the right angles (Pillow transposes); a 'P' image keeps its palette."""
+    if rotation % 360 == 0:
+        return img
+    return img.rotate(rotation, expand=True)
+
+
 def dithered_path() -> Path:
-    return _render_dir() / "dithered.png"
+    """The device frame: dithered, in the panel's native orientation."""
+    return _render_dir() / "frame.png"
 
 
 def preview_path(mode: str) -> Path:

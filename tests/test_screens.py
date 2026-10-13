@@ -6,6 +6,57 @@ def test_every_screen_renders_at_panel_size(data_dir, fake_data):
         img = fn(400, 300)  # scaled down for test speed; screens are size-agnostic
         assert img.size == (400, 300), name
         assert img.mode == "RGB", name
+        img = fn(300, 400)  # portrait: the panel hung on its side
+        assert img.size == (300, 400), name
+
+
+def test_dashboard_portrait_layouts(data_dir, fake_data):
+    import state
+    assert screens.DEFAULT_PORTRAIT_LAYOUT in screens.PORTRAIT_LAYOUTS
+    for layout in screens.PORTRAIT_LAYOUTS:
+        state.update_config(portrait_layout=layout, show_snow=True, show_now_playing=True)
+        img = screens.dashboard(1200, 1600)
+        assert img.size == (1200, 1600), layout
+    # Every layout also has a quote slot when the quote is switched back on.
+    state.update_config(show_quote=True)
+    for layout in screens.PORTRAIT_LAYOUTS:
+        state.update_config(portrait_layout=layout)
+        assert screens.dashboard(1200, 1600).size == (1200, 1600), layout
+    assert screens.dashboard(1600, 1200).size == (1600, 1200)
+
+
+def test_quote_off_by_default_and_not_fetched(data_dir, fake_data, monkeypatch):
+    import quotes
+    import state
+    calls = []
+    monkeypatch.setattr(quotes, "get_quote",
+                        lambda day=None, fits=None, vetoed=(): calls.append(1) or fake_data["quote"])
+    assert state.load_config()["show_quote"] is False
+    screens.dashboard(400, 300)
+    assert calls == []          # hidden means not even fetched
+    state.update_config(show_quote=True)
+    screens.dashboard(400, 300)
+    assert calls == [1]
+
+
+def test_quote_off_gives_the_engraving_more_room(data_dir, fake_data):
+    """With the quote hidden the art box reaches the bottom border: a tall
+    plate that would stop short of the quote now runs down to the fade."""
+    import state
+    from PIL import Image
+    tall = fake_data["animal"]["path"]
+    Image.new("RGB", (300, 1200), (30, 30, 30)).save(tall)   # solid dark plate
+    state.update_config(show_quote=False)
+    off = screens.dashboard(1600, 1200)
+    state.update_config(show_quote=True)
+    on = screens.dashboard(1600, 1200)
+
+    def lowest_ink(img):
+        for y in range(img.height - 1, 0, -1):
+            if any(img.getpixel((x, y))[0] < 128 for x in range(1200, 1600, 8)):
+                return y
+        return 0
+    assert lowest_ink(off) > lowest_ink(on)
 
 
 def test_default_screen_registered():
