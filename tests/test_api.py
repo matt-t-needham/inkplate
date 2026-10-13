@@ -165,36 +165,76 @@ def test_cycle_animal(client):
     assert client.post("/api/cycle", json={"what": "question"}).status_code == 400
 
 
-def test_veto_and_restore_animal(client):
+def _quote(text):
+    import quotes
+    return {"text": text, "author": "Someone", "work": None, "year": "1900",
+            "qotd_date": "2015-01-01", "key": quotes.key(text)}
+
+
+def test_cycle_quote(client, monkeypatch):
+    import datasources
+    import quotes
+    datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("Old.")})
+
+    def render_picks_new():   # stands in for the dashboard honouring request_next
+        datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("New.")})
+        return {"image_version": 1}
+    monkeypatch.setattr("renderer.render", lambda force=False: render_picks_new())
+    r = client.post("/api/cycle", json={"what": "quote"})
+    assert r.status_code == 200
+    assert r.json()["current"]["quote"]["text"] == "New."
+
+
+def test_cycle_quote_reports_no_replacement(client, monkeypatch):
+    import datasources
+    import quotes
+    datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("Old.")})
+    monkeypatch.setattr("renderer.render", lambda force=False: {"image_version": 1})
+    r = client.post("/api/cycle", json={"what": "quote"})
+    assert r.status_code == 502
+
+
+def test_veto_animal_image(client, monkeypatch):
     import datasources
     assert client.post("/api/veto", json={"what": "animal"}).status_code == 409  # nothing cached
     datasources._cache_write("animal.json", {"fetched_at": 0, "data": {"common_name": "fox"}})
-    assert client.post("/api/veto", json={"what": "animal"}).status_code == 200
-    assert state.load_config()["vetoed_animals"] == ["fox"]
-    assert client.get("/api/state").json()["current"]["vetoed_animals"] == ["fox"]
-    assert client.post("/api/unveto", json={"animal": "fox"}).status_code == 200
-    assert state.load_config()["vetoed_animals"] == []
-    assert client.post("/api/unveto", json={"animal": "fox"}).status_code == 404
+    assert client.post("/api/veto", json={"what": "animal"}).status_code == 409  # no file known
+    datasources._cache_write("animal.json", {"fetched_at": 0, "data": {
+        "common_name": "fox", "file": "File:Vulpes a.tif"}})
+
+    def render_picks_new():
+        datasources._cache_write("animal.json", {"fetched_at": 0, "data": {
+            "common_name": "fox", "file": "File:Vulpes b.tif"}})
+        return {"image_version": 1}
+    monkeypatch.setattr("renderer.render", lambda force=False: render_picks_new())
+    r = client.post("/api/veto", json={"what": "animal"})
+    assert r.status_code == 200
+    assert state.load_config()["vetoed_images"] == ["File:Vulpes a.tif"]
+    assert r.json()["current"]["animal"]["file"] == "File:Vulpes b.tif"
     assert client.post("/api/veto", json={"what": "weather"}).status_code == 400
+    assert client.post("/api/unveto", json={"animal": "fox"}).status_code in (404, 405)
 
 
-def test_veto_and_restore_quote(client):
+def test_veto_animal_reports_no_replacement(client, monkeypatch):
+    import datasources
+    datasources._cache_write("animal.json", {"fetched_at": 0, "data": {
+        "common_name": "fox", "file": "File:Vulpes a.tif"}})
+    monkeypatch.setattr("renderer.render", lambda force=False: {"image_version": 1})
+    assert client.post("/api/veto", json={"what": "animal"}).status_code == 502
+    assert state.load_config()["vetoed_images"] == ["File:Vulpes a.tif"]  # still vetoed
+
+
+def test_veto_quote(client, monkeypatch):
     import datasources
     import quotes
     assert client.post("/api/veto", json={"what": "quote"}).status_code == 409  # none chosen
-    q = {"text": "Be yourself.", "author": "Someone", "work": None, "year": "1900",
-         "qotd_date": "2015-01-01", "key": quotes.key("Be yourself.")}
-    datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": q})
+    datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("Be yourself.")})
     cur = client.get("/api/state").json()["current"]["quote"]
     assert cur["author"] == "Someone" and cur["year"] == "1900"
+
+    def render_picks_new():
+        datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("New.")})
+        return {"image_version": 1}
+    monkeypatch.setattr("renderer.render", lambda force=False: render_picks_new())
     assert client.post("/api/veto", json={"what": "quote"}).status_code == 200
     assert state.load_config()["vetoed_quotes"] == ["Be yourself."]
-    assert client.get("/api/state").json()["current"]["vetoed_quotes"] == ["Be yourself."]
-    assert client.post("/api/unveto", json={"quote": "Be yourself."}).status_code == 200
-    assert state.load_config()["vetoed_quotes"] == []
-    assert client.post("/api/unveto", json={"quote": "Be yourself."}).status_code == 404
-    assert client.post("/api/unveto", json={}).status_code == 400
-
-
-def test_question_endpoints_are_gone(client):
-    assert client.get("/api/questions").status_code in (404, 405)

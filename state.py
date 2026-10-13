@@ -54,8 +54,9 @@ DEFAULT_CONFIG = {
     # of refresh_minutes, which governs how often the panel itself redraws —
     # the weather wants the hourly refresh, these do not.
     "animal_period_days": 1,
-    # Common names of animals vetoed from the pane — skipped by the rotation.
-    "vetoed_animals": [],
+    # Commons file titles of animal images vetoed from the pane — never
+    # picked again (the animal itself stays in rotation, via another plate).
+    "vetoed_images": [],
     # Draw the daily quote along the bottom border. Off: the fetcher, vetoes
     # and pane card stay, the panel just doesn't show it and the engraving
     # takes the room.
@@ -162,11 +163,11 @@ def update_config(**changes) -> dict:
         cfg["animal_offset"] = int(changes["animal_offset"])
     if "animal_period_days" in changes:
         cfg["animal_period_days"] = max(1, min(365, int(changes["animal_period_days"])))
-    if "vetoed_animals" in changes:
-        v = changes["vetoed_animals"]
+    if "vetoed_images" in changes:
+        v = changes["vetoed_images"]
         if not isinstance(v, list):
-            raise TypeError("vetoed_animals must be a list")
-        cfg["vetoed_animals"] = sorted({str(n)[:80] for n in v})
+            raise TypeError("vetoed_images must be a list")
+        cfg["vetoed_images"] = sorted({str(n) for n in v})
     if "vetoed_quotes" in changes:
         v = changes["vetoed_quotes"]
         if not isinstance(v, list):

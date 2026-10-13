@@ -14,6 +14,8 @@ When today's QOTD fails a gate, a replacement is drawn from the QOTD archive
 strictly before NO_REPEAT_BEFORE (the day this feature started), so a
 fallback can never be a quote the daily feed is still going to serve.
 Fallback dates are seeded by the day, so a re-render picks the same one.
+The pane's "Next quote" (and a veto) calls `request_next`: the next render
+replaces today's pick, drawing from a freshly seeded set of archive dates.
 
 Network shape: one `action=parse` call for a QOTD page, one for the author's
 page, per candidate; MAX_TRIES caps a bad day, and a failed day backs off
@@ -159,9 +161,12 @@ def _source(author_page: str, text: str) -> dict | None:
 
 # ── selection ────────────────────────────────────────────────────────────────
 
-def _candidates(day: date):
-    yield day
-    rng = random.Random(day.toordinal())
+def _candidates(day: date, skips: int = 0):
+    """Today's QOTD, then seeded archive dates. Each `request_next` that day
+    bumps `skips`, which reseeds the draw so repeat presses never run dry."""
+    if skips == 0:
+        yield day
+    rng = random.Random(day.toordinal() if skips == 0 else f"{day.isoformat()}+{skips}")
     span = (NO_REPEAT_BEFORE - ARCHIVE_START).days
     for _ in range(MAX_TRIES - 1):
         yield ARCHIVE_START + timedelta(days=rng.randrange(span))
@@ -173,25 +178,39 @@ def cached_quote() -> dict | None:
     return c.get("data") if c else None
 
 
+def request_next(day: date | None = None) -> None:
+    """Make the next render replace today's quote with a different one. The
+    current quote is already in the shown-history, so it can't come back."""
+    day = day or date.today()
+    cur = ds._cache_read(CURRENT) or {}
+    skips = cur.get("skips", 0) + 1 if cur.get("day") == day.isoformat() else 1
+    ds._cache_write(CURRENT, {"day": day.isoformat(), "skips": skips,
+                              "advance": True, "data": cur.get("data")})
+
+
 def get_quote(day: date | None = None, fits=lambda text: True, vetoed=()) -> dict | None:
     """Today's quote: {text, author, work, year, qotd_date, key}. See module
     docstring for the gates. Falls back to the last good quote on failure."""
     day = day or date.today()
+    today = day.isoformat()
     vetoed = {key(v) for v in vetoed}
-    cur = ds._cache_read(CURRENT)
-    stale = cur.get("data") if cur else None
+    cur = ds._cache_read(CURRENT) or {}
+    same_day = cur.get("day") == today
+    skips = cur.get("skips", 0) if same_day else 0
+    advance = same_day and bool(cur.get("advance"))
+    stale = cur.get("data")
     if stale and stale.get("key") in vetoed:
         stale = None
-    if cur and cur.get("day") == day.isoformat() and stale:
+    if same_day and stale and not advance:
         return stale
     failed = ds._cache_read(FAILED)
-    if (failed and failed.get("day") == day.isoformat()
+    if (not advance and failed and failed.get("day") == today
             and time.time() - failed.get("at", 0) < FAIL_BACKOFF_S):
         return stale
 
     hist = ds._cache_read(HISTORY) or {"keys": []}
     seen = set(hist["keys"])
-    for d in _candidates(day):
+    for d in _candidates(day, skips):
         try:
             q = _qotd(d)
             if not q:
@@ -207,11 +226,15 @@ def get_quote(day: date | None = None, fits=lambda text: True, vetoed=()) -> dic
             continue
         data = {"text": q["text"], "author": q["author"], "work": src["work"],
                 "year": src["year"], "qotd_date": d.isoformat(), "key": k}
-        ds._cache_write(CURRENT, {"day": day.isoformat(), "data": data})
+        ds._cache_write(CURRENT, {"day": today, "skips": skips, "data": data})
         hist["keys"] = (hist["keys"] + [k])[-HISTORY_CAP:]
         ds._cache_write(HISTORY, hist)
         return data
 
-    ds._cache_write(FAILED, {"day": day.isoformat(), "at": time.time()})
+    ds._cache_write(FAILED, {"day": today, "at": time.time()})
+    if advance:
+        # Request consumed: keep showing the old quote (the caller sees it
+        # didn't change and reports that) rather than re-sweep every render.
+        ds._cache_write(CURRENT, {"day": today, "skips": skips, "data": cur.get("data")})
     ds._log_event(f"no usable Wikiquote quote for {day} after {MAX_TRIES} candidates")
     return stale

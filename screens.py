@@ -405,7 +405,7 @@ def _dashboard_data(cfg: dict) -> dict:
         "weather": datasources.get_weather(cfg["latitude"], cfg["longitude"]),
         "animal": datasources.get_animal(offset=cfg["animal_offset"],
                                          period_days=cfg["animal_period_days"],
-                                         vetoed=cfg["vetoed_animals"]),
+                                         vetoed=cfg["vetoed_images"]),
         "snow": (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
                  if cfg["show_snow"] else None),
         # Off by default: the quote is kept (fetcher, vetoes, pane card) but

@@ -232,7 +232,6 @@ ANIMALS = [
     ("bat", "Vespertilio", "Eurasia", "mammal"),
     ("manatee", "Trichechus", "the Caribbean & Amazon", "mammal"),
     ("seal", "Phoca", "northern seas", "mammal"),
-    ("dolphin", "Delphinus", "oceans worldwide", "mammal"),
     ("paper nautilus", "Argonauta", "warm seas worldwide", "invert"),
     ("man o' war", "Physalia", "warm oceans", "invert"),
     ("walrus", "Odobenus", "the Arctic", "mammal"),
@@ -278,7 +277,7 @@ ANIMALS = [
     ("python", "Python", "Africa & Asia", "reptile"),
     ("frog", "Rana", "the Northern Hemisphere", "amphibian"),
     ("salamander", "Salamandra", "Europe", "amphibian"),
-    ("shark", "Squalus", "oceans worldwide", "fish"),
+    ("shark", "Carcharias", "oceans worldwide", "fish"),
     ("ray", "Raja", "the Atlantic", "fish"),
     ("seahorse", "Hippocampus", "coastal seas worldwide", "fish"),
     ("octopus", "Octopus", "oceans worldwide", "invert"),
@@ -344,12 +343,12 @@ ANIMALS = [
     ("jackal", "Canis aureus", "Africa & Asia", "mammal"),
     ("wild boar", "Sus scrofa", "Eurasia", "mammal"),
     ("red deer", "Cervus elaphus", "Eurasia", "mammal"),
-    ("moose", "Alces", "northern forests", "mammal"),
+    ("moose", "Cervus alces", "northern forests", "mammal"),
     ("reindeer", "Rangifer", "the Arctic", "mammal"),
     ("ibex", "Capra ibex", "the Alps", "mammal"),
-    ("chamois", "Rupicapra", "European mountains", "mammal"),
+    ("chamois", "Antilope rupicapra", "European mountains", "mammal"),
     ("antelope", "Antilope", "Africa & Asia", "mammal"),
-    ("gazelle", "Gazella", "Africa & Arabia", "mammal"),
+    ("gazelle", "Antilope gazella", "Africa & Arabia", "mammal"),
     ("bison", "Bison", "North America & Europe", "mammal"),
     ("buffalo", "Bubalus", "South Asia", "mammal"),
     ("mole", "Talpa", "Europe", "mammal"),
@@ -400,7 +399,7 @@ ANIMALS = [
     ("gannet", "Sula", "Atlantic cliffs", "bird"),
     ("cormorant", "Phalacrocorax", "coasts worldwide", "bird"),
     ("frigatebird", "Fregata", "tropical oceans", "bird"),
-    ("tropicbird", "Phaethon", "tropical oceans", "bird"),
+    ("tropicbird", "Phaeton", "tropical oceans", "bird"),
     ("spoonbill", "Platalea", "wetlands of Eurasia & Africa", "bird"),
     ("kite", "Milvus", "Eurasia & Africa", "bird"),
     ("buzzard", "Buteo", "the Northern Hemisphere", "bird"),
@@ -433,7 +432,7 @@ ANIMALS = [
     ("cicada", "Cicada", "warm regions", "invert"),
     ("locust", "Locusta", "Africa & Asia", "invert"),
     ("stag beetle", "Lucanus", "European forests", "invert"),
-    ("scorpion", "Scorpio", "warm regions worldwide", "invert"),
+    ("scorpion", "Buthus", "warm regions worldwide", "invert"),
     ("spider", "Epeira", "worldwide", "invert"),
     ("centipede", "Scolopendra", "warm regions", "invert"),
     ("snail", "Helix", "worldwide", "invert"),
@@ -490,8 +489,10 @@ def _clean_artist(s: str) -> str:
     return "" if _UNKNOWN_ARTIST.match(s) else s
 
 
-def _try_collection(coll: dict, common: str, latin: str, slot: int) -> dict | None:
+def _try_collection(coll: dict, common: str, latin: str, slot: int,
+                    vetoed=frozenset()) -> dict | None:
     """One collection attempt: search, filter, deterministic pick, download.
+    `vetoed` holds Commons file titles banned from the pane.
     Returns the animal data dict (sans native/common) or None if unusable."""
     import re
 
@@ -537,17 +538,25 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int) -> dict | No
     # merely mentions rhinos. A collection with no titled plate is skipped;
     # the IZ backstop titles by binomial, so nearly every animal resolves.
     # A two-word Latin term must match in full: genus alone is ambiguous
-    # ("Canis" would happily label a jackal as the wolf).
+    # ("Canis" would happily label a jackal as the wolf). A one-word term
+    # must stand as the *genus*: leading the file name, or capitalised and
+    # followed by a lowercase epithet — never a substring, or "Papilio" (the
+    # butterflies) catches the fish Pteraclis papilio. The common name must
+    # be a whole word, or "butterfly" catches butterflyfish.
     latin_l = latin.lower()
-    genus = latin_l.split()[0]
 
-    def title_of(p):
-        return p.get("title", "").lower()
+    def names_beast(p) -> bool:
+        t = p.get("title", "").removeprefix("File:")
+        if " " in latin:
+            if latin_l in t.lower():
+                return True
+        elif (re.match(rf"{re.escape(latin)}\b", t, re.I)
+              or re.search(rf"\b{re.escape(latin)} [a-z]", t)):
+            return True
+        return re.search(rf"(?i)\b{re.escape(common)}\b", t) is not None
 
-    pool = [p for p in pages
-            if latin_l in title_of(p) or common.lower() in title_of(p)]
-    if not pool and " " not in latin:
-        pool = [p for p in pages if genus in title_of(p)]
+    pages = [p for p in pages if p["title"] not in vetoed]
+    pool = [p for p in pages if names_beast(p)]
     if not pool:
         return None
     # Prefer a scan of the plate itself; fall back to a photograph of one.
@@ -602,6 +611,7 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int) -> dict | No
         artist = coll["artist"]   # no Artist field at all: the corpus's own
     return {
         "path": str(_cache_dir() / ANIMAL_IMG),
+        "file": pick["title"],  # identity for the pane's image veto
         "sci_name": sci_name,
         "year": year,
         "artist": artist,
@@ -627,28 +637,27 @@ def get_animal(day: date | None = None, offset: int = 0,
     and falls through until one has a titled plate; falls back to the last
     successful image on total failure. `period_days` sets how often the animal
     changes (1 = daily); `offset` advances the sequence — the pane's "next
-    animal" button.
+    animal" button. `vetoed` holds Commons file titles: a vetoed image is
+    never picked again, and the same animal is drawn from its next plate.
     """
     day = day or date.today()
     slot = slot_for(day, period_days, offset)
     vetoed = set(vetoed)
     meta = _cache_read("animal.json")
+    # A cached entry without "file" predates image vetoes: refetch it once so
+    # the pane can veto what's showing.
     if (meta and meta.get("data", {}).get("slot") == slot
-            and meta["data"].get("common_name") not in vetoed
+            and meta["data"].get("file")
+            and meta["data"]["file"] not in vetoed
             and (_cache_dir() / ANIMAL_IMG).exists()):
         return meta["data"]
 
-    idx = slot % len(ANIMALS)
-    for step in range(len(ANIMALS)):
-        if ANIMALS[(idx + step) % len(ANIMALS)][0] not in vetoed:
-            idx = (idx + step) % len(ANIMALS)
-            break
-    common, latin, native, kind = ANIMALS[idx]
+    common, latin, native, kind = ANIMALS[slot % len(ANIMALS)]
     eligible = [c for c in COLLECTIONS if c["kinds"] is None or kind in c["kinds"]]
     rot = slot % len(eligible)
     for coll in eligible[rot:] + eligible[:rot]:
         try:
-            data = _try_collection(coll, common, latin, slot)
+            data = _try_collection(coll, common, latin, slot, vetoed)
         except Exception as e:
             log.warning("animal fetch via %s failed: %s", coll["key"], e)
             data = None
@@ -660,6 +669,6 @@ def get_animal(day: date | None = None, offset: int = 0,
 
     _log_event(f"animal illustration fetch failed for {common} in all collections")
     if (meta and (_cache_dir() / ANIMAL_IMG).exists()
-            and meta["data"].get("common_name") not in vetoed):
+            and meta["data"].get("file") not in vetoed):
         return meta["data"]  # yesterday's beast beats no beast (unless vetoed)
     return None

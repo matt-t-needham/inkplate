@@ -82,22 +82,20 @@ async def api_state():
                             if checkins else None),
         "checkins": checkins,
         "events": state.read_events(limit=50),
-        "current": _current(cfg),
+        "current": _current(),
     }
 
 
-def _current(cfg: dict) -> dict:
+def _current() -> dict:
     """What the dashboard is showing right now — for the pane's veto card.
     Both come from caches (no network on the 10 s poll)."""
     a = datasources.cached_animal()
     q = quotes.cached_quote()
     return {
         "animal": {k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
-                                          "collection")} if a else None,
+                                          "collection", "file")} if a else None,
         "quote": {k: q.get(k) for k in ("text", "author", "work", "year",
                                          "qotd_date")} if q else None,
-        "vetoed_animals": cfg["vetoed_animals"],
-        "vetoed_quotes": cfg["vetoed_quotes"],
     }
 
 
@@ -144,38 +142,54 @@ async def api_render():
 
 @app.post("/api/cycle")
 async def api_cycle(request: Request):
-    """Advance the daily animal sequence by one — the pane's layout-testing
-    button. Persists (device and preview stay in sync);
-    re-renders immediately, version bumps via the content hash."""
+    """Next animal: advance the daily animal sequence by one (persisted, so
+    device and preview stay in sync). Next quote: replace today's quote with
+    another one (the current one is in the shown-history, so it won't
+    return). Re-renders immediately; the version bumps via the content hash."""
     body = await request.json()
     what = body.get("what")
-    if what != "animal":
-        raise HTTPException(400, "what must be animal")
-    key = f"{what}_offset"
     cfg = state.load_config()
-    cfg = await asyncio.to_thread(state.update_config, **{key: cfg[key] + 1})
-    state.log_event("config", f"cycled {what} (offset {cfg[key]})")
-    m = await _rerender("cycle")
-    return {"config": cfg, "render": m}
+    if what == "animal":
+        cfg = await asyncio.to_thread(state.update_config,
+                                      animal_offset=cfg["animal_offset"] + 1)
+        state.log_event("config", f"cycled animal (offset {cfg['animal_offset']})")
+        m = await _rerender("cycle")
+    elif what == "quote":
+        before = quotes.cached_quote()
+        await asyncio.to_thread(quotes.request_next)
+        m = await _rerender("cycle")
+        after = quotes.cached_quote()
+        if not after or (before and after.get("key") == before.get("key")):
+            raise HTTPException(502, "no other usable quote found right now — "
+                                     "still showing the current one")
+        state.log_event("config", f"next quote: {after['text']} — {after.get('author')}")
+    else:
+        raise HTTPException(400, "what must be animal|quote")
+    return {"config": cfg, "render": m, "current": _current()}
 
 
 @app.post("/api/veto")
 async def api_veto(request: Request):
-    """Ban what's on screen. Animal: its common name joins vetoed_animals and
-    the rotation skips it from now on. Quote: its text joins vetoed_quotes and
-    is never picked again. Undo either with /api/unveto. The panel re-renders
-    with a replacement immediately."""
+    """Ban what's on screen, permanently. Animal: the image's Commons file
+    joins vetoed_images and is never picked again — the animal stays in
+    rotation and is redrawn from another plate. Quote: its text joins
+    vetoed_quotes and is never picked again. The panel re-renders with a
+    replacement immediately; 502 if none could be found."""
     body = await request.json()
     what = body.get("what")
     cfg = state.load_config()
     if what == "animal":
         a = datasources.cached_animal()
-        if not a or not a.get("common_name"):
-            raise HTTPException(409, "no animal is currently showing")
-        name = a["common_name"]
-        cfg = await asyncio.to_thread(state.update_config,
-                                      vetoed_animals=cfg["vetoed_animals"] + [name])
-        state.log_event("config", f"vetoed animal: {name}")
+        if not a or not a.get("file"):
+            raise HTTPException(409, "no animal image is currently showing")
+        await asyncio.to_thread(state.update_config,
+                                vetoed_images=cfg["vetoed_images"] + [a["file"]])
+        state.log_event("config", f"vetoed image: {a['file']} ({a.get('common_name')})")
+        m = await _rerender("veto")
+        new = datasources.cached_animal()
+        if not new or new.get("file") == a["file"]:
+            raise HTTPException(502, "image vetoed, but no replacement plate was "
+                                     "found — the panel shows no animal")
     elif what == "quote":
         q = quotes.cached_quote()
         if not q or not q.get("text"):
@@ -183,36 +197,15 @@ async def api_veto(request: Request):
         await asyncio.to_thread(state.update_config,
                                 vetoed_quotes=cfg["vetoed_quotes"] + [q["text"]])
         state.log_event("config", f"vetoed quote: {q['text']} — {q.get('author')}")
+        await asyncio.to_thread(quotes.request_next)
+        m = await _rerender("veto")
+        new = quotes.cached_quote()
+        if not new or new.get("key") == q.get("key"):
+            raise HTTPException(502, "quote vetoed, but no replacement was found — "
+                                     "the panel shows no quote")
     else:
         raise HTTPException(400, "what must be animal|quote")
-    m = await _rerender("veto")
-    return {"render": m, "current": _current(state.load_config())}
-
-
-@app.post("/api/unveto")
-async def api_unveto(request: Request):
-    """Restore a vetoed animal ({"animal": name}) or quote ({"quote": text})."""
-    body = await request.json()
-    cfg = state.load_config()
-    if "animal" in body:
-        name = body["animal"]
-        if name not in cfg["vetoed_animals"]:
-            raise HTTPException(404, "not vetoed")
-        cfg = await asyncio.to_thread(
-            state.update_config,
-            vetoed_animals=[n for n in cfg["vetoed_animals"] if n != name])
-        state.log_event("config", f"restored animal: {name}")
-    elif "quote" in body:
-        text = body["quote"]
-        if text not in cfg["vetoed_quotes"]:
-            raise HTTPException(404, "not vetoed")
-        cfg = await asyncio.to_thread(
-            state.update_config,
-            vetoed_quotes=[t for t in cfg["vetoed_quotes"] if t != text])
-        state.log_event("config", f"restored quote: {text}")
-    else:
-        raise HTTPException(400, "body must name an animal or a quote")
-    return {"config": cfg}
+    return {"render": m, "current": _current()}
 
 
 @app.get("/api/preview.png")

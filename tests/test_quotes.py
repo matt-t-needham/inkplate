@@ -145,6 +145,37 @@ def test_veto_drops_current_and_repicks(wiki):
     assert quotes.get_quote(TODAY, vetoed=[text.upper()]) is None   # key ignores case
 
 
+def test_request_next_picks_a_different_quote(wiki):
+    pages, _ = wiki
+    text = "Whenever you find yourself on the side of the majority, it is time to pause and reflect."
+    pages[quotes.qotd_title(TODAY)] = qotd_html(text)
+    other = "Truth is stranger than fiction, but it is because Fiction is obliged to stick to possibilities; Truth isn't."
+    for d in quotes._candidates(TODAY, skips=1):
+        pages[quotes.qotd_title(d)] = qotd_html(other)
+    assert quotes.get_quote(TODAY)["text"] == text
+    quotes.request_next(TODAY)
+    assert quotes.get_quote(TODAY)["text"] == other
+    assert quotes.get_quote(TODAY)["text"] == other   # request consumed; sticks
+
+
+def test_request_next_with_nothing_left_keeps_current(wiki):
+    pages, calls = wiki
+    text = "Whenever you find yourself on the side of the majority, it is time to pause and reflect."
+    pages[quotes.qotd_title(TODAY)] = qotd_html(text)
+    assert quotes.get_quote(TODAY)["text"] == text
+    quotes.request_next(TODAY)
+    assert quotes.get_quote(TODAY)["text"] == text   # nothing new; old stays
+    n = len(calls)
+    assert quotes.get_quote(TODAY)["text"] == text
+    assert len(calls) == n   # failed request isn't retried on every render
+
+
+def test_reseeded_candidates_differ():
+    a, b = list(quotes._candidates(TODAY)), list(quotes._candidates(TODAY, skips=1))
+    assert TODAY not in b and set(a[1:]) != set(b)
+    assert all(quotes.ARCHIVE_START <= d < quotes.NO_REPEAT_BEFORE for d in b)
+
+
 def test_failed_day_backs_off(wiki):
     pages, calls = wiki
     assert quotes.get_quote(TODAY) is None
