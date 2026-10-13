@@ -6,6 +6,7 @@ from PIL import Image
 
 import main
 import palette
+import screens
 import state
 
 
@@ -30,7 +31,8 @@ def test_state_shape(client):
     st = client.get("/api/state").json()
     assert set(st) == {"config", "screens", "portrait_layouts", "render", "last_checkin",
                        "checkins", "events", "current", "battery_percent"}
-    assert st["portrait_layouts"] == ["stack", "hero"]
+    assert st["portrait_layouts"] == list(screens.PORTRAIT_LAYOUTS)
+    assert st["portrait_layouts"][0] == screens.DEFAULT_PORTRAIT_LAYOUT == "hero"
     assert "placeholder" in st["screens"]
     assert st["last_checkin"] is None
 
