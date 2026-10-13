@@ -25,6 +25,24 @@ def test_dashboard_portrait_layouts(data_dir, fake_data):
     assert screens.dashboard(1600, 1200).size == (1600, 1200)
 
 
+def test_hero_centres_the_plate_in_the_top_section(data_dir, fake_data):
+    """Hero: the plate is centred on its ink in the art section above the
+    weather band, not bled off an edge."""
+    import state
+    from PIL import Image, ImageDraw
+    sheet = Image.new("RGB", (900, 1200), (238, 234, 224))
+    ImageDraw.Draw(sheet).rectangle([350, 300, 550, 900], fill=(30, 30, 30))
+    sheet.save(fake_data["animal"]["path"])
+    state.update_config(portrait_layout="hero", show_snow=True)
+    img = screens.dashboard(1200, 1600)
+    xs = [x for x in range(0, 1200, 4) for y in range(60, 940, 8)   # above the caption
+          if img.getpixel((x, y))[0] < 100]
+    assert xs, "no ink in the art section"
+    centre = (min(xs) + max(xs)) / 2
+    assert abs(centre - 600) < 20
+    assert max(xs) < 1180 and min(xs) > 20     # whole figure inside the frame
+
+
 def test_quote_off_by_default_and_not_fetched(data_dir, fake_data, monkeypatch):
     import quotes
     import state

@@ -30,8 +30,9 @@ DEFAULT_CONFIG = {
     # How the panel is hung: degrees it is turned clockwise from its native
     # landscape. 90/270 render the screen portrait (1200x1600) and the
     # renderer turns the frame back, so the device always receives 1600x1200
-    # and the firmware never knows. 90 = cable edge now on the left.
-    "rotation": 0,
+    # and the firmware never knows. Portrait is the primary hanging, so 90
+    # is the default; if it comes out upside down on the wall, use 270.
+    "rotation": 90,
     # Which portrait arrangement to use when rotated (screens.PORTRAIT_LAYOUTS).
     "portrait_layout": screens.DEFAULT_PORTRAIT_LAYOUT,
     # Tethered mode: device skips deep sleep and polls fast. For bring-up.

@@ -196,15 +196,19 @@ where the native top-left corner goes when the panel turns clockwise).
 
 **Two portrait arrangements, picked in the pane** (`portrait_layout`), so
 they can be compared on the wall rather than argued about from mockups:
-- *stack* (default): the landscape arrangement folded — weather top-left,
-  caption top-right, engraving across the lower two thirds, snow bottom-left
-  over the art's faded edge.
-- *hero*: the engraving fills the top and bleeds off the top edge the way it
-  bleeds off the right in landscape; weather, caption and snow share a band
-  along the bottom. A wide plate sits on the band instead of being top-bled
-  (it would float otherwise). The band grows from 440 to 540 px when the
-  snow report is on — the only way to fit caption and snow in the right
-  column without overlap.
+- *hero* (default — Matt picked it, and portrait is now the primary hanging,
+  so `rotation` defaults to 90): the bottom third is the weather band
+  (weather left; now-playing and the snow report right), the top two thirds
+  are the art section. The plate is centred there on its **ink centroid**,
+  not its bounding box (a heron is a big body under a thin neck; the eye
+  centres the body), clamped inside the section. Nothing overlaps it except
+  its own caption, so the long edge fades go: a 36 px softening only. The
+  caption sits in the section's bottom-right corner, on the art, and where
+  the two meet the art is lightened under it with a feathered white patch
+  (`_fade_behind`) — fade the image for the text, not the whole edge.
+- *stack*: the landscape arrangement folded — weather top-left, caption
+  top-right, engraving across the lower two thirds, snow bottom-left over the
+  art's faded edge. Kept as the alternative.
 
 One portrait-specific rule: in a 1200 px-wide frame the weather's first row
 (glyph · 21° · HIGH 28°) reaches x≈920, so the caption cannot share that row

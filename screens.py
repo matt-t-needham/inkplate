@@ -362,26 +362,35 @@ def _sun_horizon(d: ImageDraw.ImageDraw, x: int, y: int, size: int, rising: bool
 # the finished frame back to the panel's native orientation, the device never
 # knows). Portrait has two arrangements, picked in the pane:
 #
+#   hero  — (default) the engraving sits centred in the top two thirds, its
+#           caption overlaid in that section's bottom-right corner (the art
+#           fades locally under it); weather and snow share the bottom third.
 #   stack — weather top-left, caption top-right, the engraving fills the lower
 #           two thirds; snow report bottom-left over the art's faded edge.
-#   hero  — the engraving fills the top two thirds and bleeds off the top and
-#           right; weather, caption and snow share a band along the bottom.
 
 LANDSCAPE = (1600, 1200)   # layout coordinates; renders scale from these
 PORTRAIT = (1200, 1600)
 
-PORTRAIT_LAYOUTS = ("stack", "hero")
-DEFAULT_PORTRAIT_LAYOUT = "stack"
+PORTRAIT_LAYOUTS = ("hero", "stack")
+DEFAULT_PORTRAIT_LAYOUT = "hero"
 
 WEATHER_BLOCK_H = 440      # top of the glyph row to the bottom of the °F line
 # Portrait: the weather's first row (glyph · 21° · HIGH 28°) reaches x≈920 of
 # 1200, so the caption can't share that row as it does in landscape — it
 # tucks under the HIGH temperature instead, right-aligned.
 PORTRAIT_CAPTION_TOP = 196
-# Hero band: weather on the left; caption and (when on) the snow report
-# stacked on the right under the HIGH column, which needs a taller band.
+# Hero: the bottom third is the weather band (weather left, snow report and
+# now-playing right); everything above the band, inside HERO_MARGIN, is the
+# art section. Centred art has no edge to bleed off, so it gets only a soft
+# HERO_FADE on every side — enough to hide the crop line, not a dissolve.
 HERO_BAND_H = WEATHER_BLOCK_H
-HERO_BAND_H_SNOW = 540
+HERO_MARGIN = 40
+HERO_FADE = 36
+# The caption sits on the art; where the two overlap the art is lightened
+# under it (a feathered white patch) so the text reads without a heavy halo.
+CAPTION_FADE_STRENGTH = 0.82
+CAPTION_FADE_PAD = 22
+CAPTION_FADE_FEATHER = 28
 
 
 def _dashboard_data(cfg: dict) -> dict:
@@ -472,16 +481,26 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
         if data["quote"]:
             band_bottom = _draw_quote(ImageDraw.Draw(img), data["quote"], LX,
                                       band_bottom, X, Y, halo) - Y(40)
-        band_top = band_bottom - Y(HERO_BAND_H_SNOW if data["snow"] else HERO_BAND_H)
-        drew_art = _draw_art(img, data["animal"], (0, 0, width, band_top - Y(40)),
-                             X, Y, valign="hero")
+        band_top = band_bottom - Y(HERO_BAND_H)
+        m = X(HERO_MARGIN)
+        box = (m, Y(HERO_MARGIN), width - m, band_top - Y(HERO_MARGIN))
+        art_rect = _draw_art(img, data["animal"], box, X, Y, mode="centered")
         d = ImageDraw.Draw(img)
+        if art_rect:
+            # Caption in the art section's bottom-right corner, on the art.
+            f_cap = _font(Y(26), style="serif_italic")
+            lines = _caption_lines(d, data["animal"], f_cap, X(CAPTION_WIDTH))
+            cap_h = Y(34) * len(lines)
+            cap_top = box[3] - cap_h + Y(6)
+            cap_w = max(d.textlength(ln, font=f_cap) for ln in lines)
+            rect = (int(right - cap_w), cap_top, right, cap_top + cap_h)
+            if _overlaps(rect, art_rect):
+                _fade_behind(img, rect, X, Y)
+            _draw_caption_lines(d, lines, f_cap, right, cap_top, Y, halo)
         _draw_weather(d, data["weather"], LX, band_top, X, Y, halo)
-        cap_top = band_top + Y(PORTRAIT_CAPTION_TOP - 44)
-        n = _draw_caption(d, data["animal"] if drew_art else None, right,
-                          cap_top, X, Y, halo)
-        _draw_now_playing(d, data["now_playing"], right,
-                          cap_top + Y(34) * n + Y(12), X, Y, halo)
+        # Right column of the band: now-playing under the HIGH temperature,
+        # snow report bottom-aligned (its label starts ~234 px into the band).
+        _draw_now_playing(d, data["now_playing"], right, band_top + Y(168), X, Y, halo)
         if data["snow"]:
             _snow_report(d, X(560), band_bottom, data["snow"], X, Y, halo,
                          name=cfg["snow_location_name"])
@@ -507,30 +526,46 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
 
 # ── dashboard widgets ─────────────────────────────────────────────────────────
 
+def _ink_centroid(art: Image.Image) -> tuple[float, float]:
+    """Centre of ink mass of a prepared plate, in its own pixels. The subject
+    crop already bounds the figure; this is what centres it *visually* — a
+    heron is a big body under a thin neck, and the eye centres the body."""
+    mask, (sw, sh) = _ink_mask(art)
+    sx = sy = n = 0
+    for i, v in enumerate(mask.getdata()):
+        if v:
+            sx += i % sw
+            sy += i // sw
+            n += 1
+    if not n:
+        return art.width / 2, art.height / 2
+    return (sx / n + 0.5) * art.width / sw, (sy / n + 0.5) * art.height / sh
+
+
 def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
-              valign: str = "center") -> bool:
+              mode: str = "bleed"):
     """The engraving, fitted into a fixed art box (x0, y0, x1, y1) in frame
     pixels. The box is defined in panel coordinates, not derived from the
     image, so every plate lands in the same place whatever its dimensions.
-    A figure is contained (never cut), a scene covers the box; either way the
-    art is anchored to the box's right edge with the last ART_BLEED of it
-    running off the frame. valign "center" centres it in the box; "hero"
-    (the portrait hero layout) anchors a plate that fills the box's height
-    to the top edge the same way, bleeding off it, and sits a wide one on the
-    box's bottom edge so it meets the info band instead of floating.
-    Returns True if something was drawn."""
+    A figure is contained (never cut), a scene covers the box.
+
+    mode "bleed" (landscape, stack): anchored to the box's right edge with
+    the last ART_BLEED running off the frame, long fades on the left and
+    the top/bottom edges so text can sit over it.
+    mode "centered" (hero): the plate's ink centroid is put on the box's
+    centre (clamped so nothing leaves the box), with only a soft HERO_FADE
+    on every side — nothing overlaps it except its own caption.
+    Returns the pasted rectangle, or None if nothing was drawn."""
     if not animal:
-        return False
+        return None
     bx0, by0, bx1, by1 = box
     bw, bh = bx1 - bx0, by1 - by0
     try:
         art, is_scene = _prep_engraving(Image.open(animal["path"]).convert("RGB"))
     except OSError:
-        return False
+        return None
     fit = max if is_scene else min
     scale = fit(bw / art.width, bh / art.height)
-    fills_height = is_scene or bh / art.height <= bw / art.width
-    bleed_top = valign == "hero" and fills_height
     art = art.resize((max(1, round(art.width * scale)),
                       max(1, round(art.height * scale))), Image.LANCZOS)
     if is_scene:   # cover: trim the overflow around the centre
@@ -541,30 +576,54 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     # Fade widths are fixed on the panel, not a share of the image —
     # otherwise a small plate fades over a few pixels and a large one
     # over hundreds, which is what made the peacock dissolve early.
-    edge = min(0.45, Y(ART_FADE_EDGE) / art.height)
-    mask = _edge_fade_mask(
-        art.width, art.height,
-        left=min(0.45, X(ART_FADE_LEFT) / art.width), right=0.0,
-        top=0.0 if bleed_top else edge, bottom=edge)
-    x = bx1 - round(art.width * (1 - ART_BLEED))
-    if bleed_top:
-        y = by0 - round(art.height * ART_BLEED)
-    elif valign == "hero":
-        y = by1 - art.height
+    if mode == "centered":
+        fx, fy = min(0.45, X(HERO_FADE) / art.width), min(0.45, Y(HERO_FADE) / art.height)
+        mask = _edge_fade_mask(art.width, art.height, left=fx, right=fx, top=fy, bottom=fy)
+        cx, cy = _ink_centroid(art)
+        x = round(bx0 + bw / 2 - cx)
+        y = round(by0 + bh / 2 - cy)
+        x = max(bx0, min(bx1 - art.width, x))
+        y = max(by0, min(by1 - art.height, y))
     else:
+        edge = min(0.45, Y(ART_FADE_EDGE) / art.height)
+        mask = _edge_fade_mask(
+            art.width, art.height,
+            left=min(0.45, X(ART_FADE_LEFT) / art.width), right=0.0,
+            top=edge, bottom=edge)
+        x = bx1 - round(art.width * (1 - ART_BLEED))
         y = by0 + (bh - art.height) // 2
     img.paste(art, (x, y), mask)
-    return True
+    return (x, y, x + art.width, y + art.height)
 
 
-def _draw_caption(d: ImageDraw.ImageDraw, animal: dict | None, right: int, top: int,
-                  X, Y, halo, max_w: int | None = None, max_lines: int = 4) -> int:
-    """Right-aligned source caption: "Rhinoceros · Rhinoceros unicornis /
+def _overlaps(a, b) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _fade_behind(img: Image.Image, rect, X, Y) -> None:
+    """Lighten the image under `rect` (x0, y0, x1, y1): a rounded, feathered
+    white patch at CAPTION_FADE_STRENGTH, so a caption laid over the art
+    reads without the art disappearing around it."""
+    from PIL import ImageFilter
+    pad, feather = X(CAPTION_FADE_PAD), X(CAPTION_FADE_FEATHER)
+    x0, y0, x1, y1 = rect
+    # Work on a crop: a full-frame blur is needless work.
+    reach = pad + feather * 3
+    cx0, cy0 = max(0, x0 - reach), max(0, y0 - reach)
+    cx1, cy1 = min(img.width, x1 + reach), min(img.height, y1 + reach)
+    m = Image.new("L", (cx1 - cx0, cy1 - cy0), 0)
+    ImageDraw.Draw(m).rounded_rectangle(
+        [x0 - pad - cx0, y0 - pad - cy0, x1 + pad - cx0, y1 + pad - cy0],
+        radius=pad, fill=int(255 * CAPTION_FADE_STRENGTH))
+    m = m.filter(ImageFilter.GaussianBlur(feather))
+    img.paste(WHITE, (cx0, cy0, cx1, cy1), m)
+
+
+def _caption_lines(d: ImageDraw.ImageDraw, animal: dict, font, max_w: int,
+                   max_lines: int = 4) -> list[str]:
+    """Source caption lines: "Rhinoceros · Rhinoceros unicornis /
     of South Asia / as depicted by Conrad Gessner, Zürich, 1551". One idea
-    per line, wrapped narrow enough to stay clear of the weather block's HIGH
-    column. Returns the number of lines drawn."""
-    if not animal:
-        return 0
+    per line, each wrapped at max_w."""
     line1 = animal.get("common_name", "?").capitalize()
     if animal.get("sci_name"):
         line1 += f" · {animal['sci_name']}"
@@ -579,16 +638,30 @@ def _draw_caption(d: ImageDraw.ImageDraw, animal: dict | None, right: int, top: 
     if clause and year:
         clause += f", {year}"
     rest = [f"of {animal['native']}" if animal.get("native") else None, clause]
-    f_cap = _font(Y(26), style="serif_italic")
     lines = []
     for part in [line1] + [r for r in rest if r]:
-        lines += _wrap(d, part, f_cap, max_w or X(CAPTION_WIDTH))
-    lines = lines[:max_lines]
+        lines += _wrap(d, part, font, max_w)
+    return lines[:max_lines]
+
+
+def _draw_caption_lines(d: ImageDraw.ImageDraw, lines: list[str], font, right: int,
+                        top: int, Y, halo) -> None:
     cy = top
     for ln in lines:
-        d.text((right - d.textlength(ln, font=f_cap), cy), ln, font=f_cap,
+        d.text((right - d.textlength(ln, font=font), cy), ln, font=font,
                fill=BLACK, **halo)
         cy += Y(34)
+
+
+def _draw_caption(d: ImageDraw.ImageDraw, animal: dict | None, right: int, top: int,
+                  X, Y, halo, max_w: int | None = None, max_lines: int = 4) -> int:
+    """Right-aligned source caption at (right, top), wrapped narrow enough to
+    stay clear of the weather block's HIGH column. Returns lines drawn."""
+    if not animal:
+        return 0
+    f_cap = _font(Y(26), style="serif_italic")
+    lines = _caption_lines(d, animal, f_cap, max_w or X(CAPTION_WIDTH), max_lines)
+    _draw_caption_lines(d, lines, f_cap, right, top, Y, halo)
     return len(lines)
 
 
