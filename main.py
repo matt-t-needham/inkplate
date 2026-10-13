@@ -82,18 +82,21 @@ async def api_state():
                             if checkins else None),
         "checkins": checkins,
         "events": state.read_events(limit=50),
-        "current": _current(),
+        "current": _current(cfg),
     }
 
 
-def _current() -> dict:
+def _current(cfg: dict | None = None) -> dict:
     """What the dashboard is showing right now — for the pane's veto card.
     Both come from caches (no network on the 10 s poll)."""
+    cfg = cfg or state.load_config()
     a = datasources.cached_animal()
     q = quotes.cached_quote()
     return {
-        "animal": {k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
-                                          "collection", "file")} if a else None,
+        "animal": ({k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
+                                           "collection", "file")}
+                   | {"rotation": (cfg.get("image_rotations") or {}).get(a.get("file"), 0)}
+                   if a else None),
         "quote": {k: q.get(k) for k in ("text", "author", "work", "year",
                                          "qotd_date")} if q else None,
     }
@@ -206,6 +209,33 @@ async def api_veto(request: Request):
     else:
         raise HTTPException(400, "what must be animal|quote")
     return {"render": m, "current": _current()}
+
+
+@app.post("/api/rotate")
+async def api_rotate(request: Request):
+    """Turn the image on screen by a quarter: some plates are scanned
+    sideways (a landscape figure bound into a portrait book). The turn is
+    stored per Commons file in image_rotations and accumulates — four clicks
+    bring it back round. Re-renders immediately; the version bumps via the
+    content hash."""
+    body = await request.json()
+    try:
+        step = int(body.get("degrees", 90))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "degrees must be an integer")
+    if step % 90:
+        raise HTTPException(400, "degrees must be a multiple of 90")
+    a = datasources.cached_animal()
+    if not a or not a.get("file"):
+        raise HTTPException(409, "no animal image is currently showing")
+    cfg = state.load_config()
+    rots = dict(cfg.get("image_rotations") or {})
+    rots[a["file"]] = (int(rots.get(a["file"], 0)) + step) % 360
+    cfg = await asyncio.to_thread(state.update_config, image_rotations=rots)
+    state.log_event("config", f"rotated image {a['file']} to "
+                              f"{cfg['image_rotations'].get(a['file'], 0)}°")
+    m = await _rerender("rotate")
+    return {"config": cfg, "render": m, "current": _current(cfg)}
 
 
 @app.get("/api/preview.png")

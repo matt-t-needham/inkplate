@@ -365,7 +365,10 @@ ANIMALS = [
     ("chinchilla", "Chinchilla", "the Andes", "mammal"),
     ("gorilla", "Gorilla", "Central Africa", "mammal"),
     ("gibbon", "Hylobates", "Southeast Asia", "mammal"),
-    ("baboon", "Cynocephalus", "Africa", "mammal"),
+    # Papio, not the period "Cynocephalus": that genus now names the colugo
+    # (Cynocephalus volans), so the old term captioned a flying lemur as
+    # a baboon. The colugo entry below keeps its own period name.
+    ("baboon", "Papio", "Africa", "mammal"),
     ("aye-aye", "Cheiromys", "Madagascar", "mammal"),
     ("koala", "Phascolarctos", "Australia", "mammal"),
     ("thylacine", "Thylacinus", "Tasmania", "mammal"),

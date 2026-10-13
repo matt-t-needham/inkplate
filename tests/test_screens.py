@@ -235,3 +235,62 @@ def test_quote_fits_and_attribution():
     q = {"author": "Mark Twain", "work": "Following the Equator", "year": "1897"}
     assert screens.quote_attribution(q) == "— Mark Twain, Following the Equator (1897)"
     assert screens.quote_attribution(q, with_work=False) == "— Mark Twain (1897)"
+
+
+def _figure_plate(w=900, h=1200):
+    """A tall figure on a sheet of paper with generous margins."""
+    from PIL import ImageDraw
+    sheet = _sheet(w, h)
+    ImageDraw.Draw(sheet).rectangle([350, 300, 550, 900], fill=(30, 30, 30))
+    return sheet
+
+
+def test_draw_art_zooms_a_contained_figure_into_the_box():
+    """A figure is leaned into by ART_ZOOM rather than floated in its own
+    paper: the pasted plate fills the box's short axis fully and is cropped,
+    never larger than the box."""
+    import tempfile
+    from PIL import Image
+    box = (100, 100, 1100, 1100)
+
+    def draw():
+        return screens._draw_art(Image.new("RGB", (1200, 1200), "white"),
+                                 {"path": f.name}, box, lambda v: v, lambda v: v,
+                                 mode="centered")
+    with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
+        _figure_plate().save(f.name)
+        zoomed = draw()
+        screens.ART_ZOOM, keep = 1.0, screens.ART_ZOOM
+        try:
+            fitted = draw()
+        finally:
+            screens.ART_ZOOM = keep
+    x0, y0, x1, y1 = zoomed
+    assert x0 >= box[0] and y0 >= box[1] and x1 <= box[2] and y1 <= box[3]
+    assert y1 - y0 == 1000                              # fills the limiting axis
+    assert (x1 - x0) > (fitted[2] - fitted[0]) * 1.1     # visibly larger than a fit
+
+
+def test_draw_art_applies_per_image_rotation():
+    """animal["rotation"] (clockwise degrees) turns the plate before the crop:
+    a tall figure rotated 90° lands on the panel as a wide one."""
+    import tempfile
+    from PIL import Image
+    with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
+        _figure_plate().save(f.name)
+        box = (0, 0, 1000, 1000)
+        upright = screens._draw_art(Image.new("RGB", (1000, 1000), "white"),
+                                    {"path": f.name}, box, lambda v: v, lambda v: v)
+        turned = screens._draw_art(Image.new("RGB", (1000, 1000), "white"),
+                                   {"path": f.name, "rotation": 90}, box,
+                                   lambda v: v, lambda v: v)
+    assert upright[3] - upright[1] > upright[2] - upright[0]   # tall
+    assert turned[2] - turned[0] > turned[3] - turned[1]       # wide
+
+
+def test_with_rotation_reads_config_by_file():
+    a = {"file": "File:Gorilla.tif", "path": "x"}
+    assert screens._with_rotation(a, {"File:Gorilla.tif": 90})["rotation"] == 90
+    assert screens._with_rotation(a, {})["rotation"] == 0
+    assert screens._with_rotation(None, {}) is None
+    assert "rotation" not in a   # the cached dict is not mutated

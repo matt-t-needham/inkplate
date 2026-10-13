@@ -77,3 +77,16 @@ def test_battery_percent_curve():
     assert state.battery_percent(None) is None
     assert state.battery_percent("junk") is None
     assert state.battery_percent(0.0) is None   # ADC not wired / no battery
+
+
+def test_image_rotations_validation(data_dir):
+    import pytest
+    cfg = state.update_config(image_rotations={"File:A.tif": 90, "File:B.tif": 450,
+                                               "File:C.tif": 0, "File:D.tif": -90})
+    # normalised to 0..270, zero entries dropped, reloads intact
+    assert cfg["image_rotations"] == {"File:A.tif": 90, "File:B.tif": 90, "File:D.tif": 270}
+    assert state.load_config()["image_rotations"] == cfg["image_rotations"]
+    with pytest.raises(ValueError):
+        state.update_config(image_rotations={"File:A.tif": 45})
+    with pytest.raises(TypeError):
+        state.update_config(image_rotations=["File:A.tif"])

@@ -337,6 +337,28 @@ is lightly tinted (≈50), Brehm is pure monochrome wood engraving (0). The
 Spectra-6 palette renders the hand-coloured bird plates surprisingly well —
 a Gould toucan keeps its orange bill.
 
+## 20f. Lean into the plate; turn sideways scans; baboon → Papio (2026-10-13)
+Three things Matt saw on the wall. **Whitespace:** the subject crop padded
+6% and a contained figure then floated in whatever the box didn't share its
+aspect with. The pad is 3% now, and `_draw_art` scales a figure past its fit
+by `ART_ZOOM` (1.15) and crops the overflow around the ink centroid — the
+cut is paper margin, and the fixed-width fades swallow the edge. Scenes
+still cover. **Sideways plates** (a landscape figure bound into a portrait
+book — the gorilla on a newspaper clipping): no automatic fix. The turn's
+*direction* is the hard part and a wrong guess hangs the beast upside down,
+which is worse than sideways; the pane gets a **Rotate ↻** button instead,
+a quarter clockwise per click, stored per Commons file in config
+`image_rotations` (like `vetoed_images`), applied before the crop so the
+fades and the centroid see the plate upright. Four clicks bring it round and
+the entry drops out of config. **"Baboon" that wasn't:** the Latin term was
+the period *Cynocephalus*, which modern taxonomy gives to the colugo
+(*Cynocephalus volans*), so a titled, perfectly genuine plate of a flying
+lemur captioned itself a baboon — the title filter did its job, the term
+lied. Now *Papio*. The remaining period names were read for the same drift;
+*Harpyia* (harpy eagle) is also a moth genus and is the one to watch at the
+next sweep. Could not run the live resolution sweep from this session
+(Commons unreachable) — re-run it before trusting the baboon pool.
+
 ## 20e. Genus must lead the binomial; vetoes are per image (2026-10-09)
 "Butterfly" (*Papilio*) showed a fish twice: the title match was a substring
 test, so a genus-only term matched any *epithet* — *Pteraclis papilio* (a
