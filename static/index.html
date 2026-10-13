@@ -164,7 +164,10 @@
         <div class="k">Animal</div>
         <div class="v" id="now-animal">—</div>
         <div class="sub" id="now-animal-sub"></div>
-        <div class="btn-row"><button class="danger" id="btn-veto-animal">Veto image</button></div>
+        <div class="btn-row">
+          <button class="ghost" id="btn-rotate-animal" title="Turn the plate a quarter clockwise — for a scan bound in sideways. Remembered for this image.">Rotate ↻</button>
+          <button class="danger" id="btn-veto-animal">Veto image</button>
+        </div>
       </div>
       <div class="now-row" style="margin-bottom:0">
         <div class="k">Quote <span id="now-q-date"></span></div>
@@ -328,8 +331,10 @@ function renderNow(cur) {
   if (!cur) return;
   const a = cur.animal;
   $('now-animal').textContent = a ? a.common_name : 'none cached yet';
-  $('now-animal-sub').textContent = a ? [a.sci_name, a.year, a.artist].filter(Boolean).join(' · ') : '';
+  $('now-animal-sub').textContent = a ? [a.sci_name, a.year, a.artist,
+    a.rotation ? 'turned ' + a.rotation + '°' : null].filter(Boolean).join(' · ') : '';
   $('btn-veto-animal').disabled = !(a && a.file);
+  $('btn-rotate-animal').disabled = !(a && a.file);
   const q = cur.quote;
   $('now-q').textContent = q ? '“' + q.text + '”' : 'none chosen yet';
   $('now-q-attr').textContent = q ? '— ' + [q.author, q.work].filter(Boolean).join(', ') + ' (' + q.year + ')' : '';
@@ -348,6 +353,15 @@ async function veto(what, btn) {
   finally { btn.disabled = false; await loadState(); refreshPreviewImg(); }
 }
 $('btn-veto-animal').addEventListener('click', e => veto('animal', e.target));
+
+async function rotateAnimal(btn) {
+  btn.disabled = true;
+  try {
+    await api('POST', 'api/rotate', {degrees: 90});
+  } catch (e) { alert('Rotate failed: ' + e.message); }
+  finally { btn.disabled = false; await loadState(); refreshPreviewImg(); }
+}
+$('btn-rotate-animal').addEventListener('click', e => rotateAnimal(e.target));
 $('btn-veto-q').addEventListener('click', e => veto('quote', e.target));
 
 function renderDeviceBadge(st) {

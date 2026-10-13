@@ -57,6 +57,9 @@ DEFAULT_CONFIG = {
     # Commons file titles of animal images vetoed from the pane — never
     # picked again (the animal itself stays in rotation, via another plate).
     "vetoed_images": [],
+    # Per-image rotation (clockwise degrees, keyed by Commons file title)
+    # for plates scanned sideways. Only non-zero entries are kept.
+    "image_rotations": {},
     # Draw the daily quote along the bottom border. Off: the fetcher, vetoes
     # and pane card stay, the panel just doesn't show it and the engraving
     # takes the room.
@@ -97,6 +100,8 @@ def load_config() -> dict:
         cfg["screen"] = screens.DEFAULT_SCREEN
     if cfg["rotation"] not in ROTATIONS:
         cfg["rotation"] = 0
+    if not isinstance(cfg.get("image_rotations"), dict):
+        cfg["image_rotations"] = {}
     if cfg["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
         cfg["portrait_layout"] = screens.DEFAULT_PORTRAIT_LAYOUT
     return cfg
@@ -168,6 +173,18 @@ def update_config(**changes) -> dict:
         if not isinstance(v, list):
             raise TypeError("vetoed_images must be a list")
         cfg["vetoed_images"] = sorted({str(n) for n in v})
+    if "image_rotations" in changes:
+        v = changes["image_rotations"]
+        if not isinstance(v, dict):
+            raise TypeError("image_rotations must be a mapping")
+        rots = {}
+        for k, deg in v.items():
+            deg = int(deg) % 360
+            if deg not in ROTATIONS:
+                raise ValueError("image rotation must be 0, 90, 180 or 270")
+            if deg:
+                rots[str(k)] = deg
+        cfg["image_rotations"] = rots
     if "vetoed_quotes" in changes:
         v = changes["vetoed_quotes"]
         if not isinstance(v, list):

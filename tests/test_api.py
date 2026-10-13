@@ -215,6 +215,23 @@ def test_veto_animal_image(client, monkeypatch):
     assert client.post("/api/unveto", json={"animal": "fox"}).status_code in (404, 405)
 
 
+def test_rotate_animal_image(client, monkeypatch):
+    import datasources
+    assert client.post("/api/rotate", json={}).status_code == 409   # nothing cached
+    datasources._cache_write("animal.json", {"fetched_at": 0, "data": {
+        "common_name": "gorilla", "file": "File:Gorilla.tif"}})
+    monkeypatch.setattr("renderer.render", lambda force=False: {"image_version": 1})
+    assert client.post("/api/rotate", json={"degrees": 45}).status_code == 400
+    r = client.post("/api/rotate", json={})
+    assert r.status_code == 200
+    assert r.json()["config"]["image_rotations"] == {"File:Gorilla.tif": 90}
+    assert r.json()["current"]["animal"]["rotation"] == 90
+    for _ in range(3):   # a full turn brings the entry back out of config
+        r = client.post("/api/rotate", json={"degrees": 90})
+    assert r.json()["config"]["image_rotations"] == {}
+    assert client.get("/api/state").json()["current"]["animal"]["rotation"] == 0
+
+
 def test_veto_animal_reports_no_replacement(client, monkeypatch):
     import datasources
     datasources._cache_write("animal.json", {"fetched_at": 0, "data": {

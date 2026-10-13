@@ -170,6 +170,11 @@ SCENE_INK_COVERAGE = 0.50
 ART_BLEED = 0.075
 ART_FADE_LEFT = 300
 ART_FADE_EDGE = 120
+# A contained figure is scaled past its fit by this much and the overflow
+# cropped around its ink centroid: the subject box keeps a margin of paper
+# and a fit-to-box plate still floats in white, so lean in. The overflow is
+# at most 1 - 1/ART_ZOOM of the long axis, which the edge fades swallow.
+ART_ZOOM = 1.15
 
 
 def _paper_tone(g: Image.Image, pct: float = 0.75) -> int:
@@ -252,7 +257,7 @@ def _trim_borders(img: Image.Image, dark: float = 0.62, max_frac: float = 0.18):
     return img.crop((int(x0 * sx), int(y0 * sy), int((x1 + 1) * sx), int((y1 + 1) * sy)))
 
 
-def _subject_box(img: Image.Image, pad: float = 0.06):
+def _subject_box(img: Image.Image, pad: float = 0.03):
     mask, (sw, sh) = _ink_mask(img)
     cols, rows = _profiles(mask, (sw, sh))
     x0, x1 = _dominant_run(cols)
@@ -399,13 +404,24 @@ CAPTION_FADE_PAD = 22
 CAPTION_FADE_FEATHER = 28
 
 
+def _with_rotation(animal: dict | None, rotations: dict) -> dict | None:
+    """The animal dict plus its per-image "rotation" (clockwise degrees)
+    from config, keyed by the Commons file — for plates scanned sideways.
+    The cached dict is left untouched."""
+    if not animal:
+        return animal
+    return {**animal, "rotation": int(rotations.get(animal.get("file"), 0)) % 360}
+
+
 def _dashboard_data(cfg: dict) -> dict:
     """Every source the dashboard draws from, each independently optional."""
     return {
         "weather": datasources.get_weather(cfg["latitude"], cfg["longitude"]),
-        "animal": datasources.get_animal(offset=cfg["animal_offset"],
-                                         period_days=cfg["animal_period_days"],
-                                         vetoed=cfg["vetoed_images"]),
+        "animal": _with_rotation(
+            datasources.get_animal(offset=cfg["animal_offset"],
+                                   period_days=cfg["animal_period_days"],
+                                   vetoed=cfg["vetoed_images"]),
+            cfg.get("image_rotations") or {}),
         "snow": (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
                  if cfg["show_snow"] else None),
         # Off by default: the quote is kept (fetcher, vetoes, pane card) but
@@ -553,7 +569,10 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     """The engraving, fitted into a fixed art box (x0, y0, x1, y1) in frame
     pixels. The box is defined in panel coordinates, not derived from the
     image, so every plate lands in the same place whatever its dimensions.
-    A figure is contained (never cut), a scene covers the box.
+    A figure is contained, then leaned into by ART_ZOOM (the overflow is
+    paper margin, cut around the ink centroid); a scene covers the box.
+    `animal["rotation"]` (clockwise degrees, from config) turns a plate
+    that was scanned sideways before anything else looks at it.
 
     mode "bleed" (landscape, stack): anchored to the box's right edge with
     the last ART_BLEED running off the frame, long fades on the left and
@@ -567,18 +586,31 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     bx0, by0, bx1, by1 = box
     bw, bh = bx1 - bx0, by1 - by0
     try:
-        art, is_scene = _prep_engraving(Image.open(animal["path"]).convert("RGB"))
+        plate = Image.open(animal["path"]).convert("RGB")
     except OSError:
         return None
+    # A plate scanned sideways is turned first (PIL rotates anticlockwise,
+    # the config says clockwise), so the crop and the fades see it upright.
+    rot = int(animal.get("rotation") or 0) % 360
+    if rot:
+        plate = plate.rotate(-rot, expand=True)
+    art, is_scene = _prep_engraving(plate)
     fit = max if is_scene else min
     scale = fit(bw / art.width, bh / art.height)
+    if not is_scene:
+        scale *= ART_ZOOM
     art = art.resize((max(1, round(art.width * scale)),
                       max(1, round(art.height * scale))), Image.LANCZOS)
-    if is_scene:   # cover: trim the overflow around the centre
-        ox, oy = (art.width - bw) // 2, (art.height - bh) // 2
-        art = art.crop((max(0, ox), max(0, oy),
-                        max(0, ox) + min(bw, art.width),
-                        max(0, oy) + min(bh, art.height)))
+    if art.width > bw or art.height > bh:
+        # Trim the overflow: a scene around its centre, a zoomed figure
+        # around its ink centroid so the body stays and the margin goes.
+        if is_scene:
+            cx, cy = art.width / 2, art.height / 2
+        else:
+            cx, cy = _ink_centroid(art)
+        ox = max(0, min(art.width - bw, round(cx - bw / 2)))
+        oy = max(0, min(art.height - bh, round(cy - bh / 2)))
+        art = art.crop((ox, oy, ox + min(bw, art.width), oy + min(bh, art.height)))
     # Fade widths are fixed on the panel, not a share of the image —
     # otherwise a small plate fades over a few pixels and a large one
     # over hundreds, which is what made the peacock dissolve early.
