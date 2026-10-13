@@ -311,22 +311,39 @@ def test_animal_offset_changes_slot(data_dir, no_network, monkeypatch):
     assert b["slot"] == a["slot"] + 1
 
 
-def test_vetoed_animal_is_skipped_even_when_cached(data_dir, no_network, monkeypatch):
+def test_vetoed_image_is_replaced_by_another_plate(data_dir, no_network, monkeypatch):
     day = date(2026, 9, 17)
-    fox = ("fox", "Vulpes", "the Northern Hemisphere", "mammal")
-    red = ("red fox", "Vulpes vulpes", "Eurasia", "mammal")
-    # Order the list so today's slot lands on "fox".
-    animals = [fox, red] if datasources.slot_for(day) % 2 == 0 else [red, fox]
-    monkeypatch.setattr(datasources, "ANIMALS", animals)
-    monkeypatch.setattr(datasources, "COLLECTIONS", [datasources.COLLECTIONS[0]])
-    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: COMMONS_RAW)
+    _pin(monkeypatch, day, ("fox", "Vulpes", "the Northern Hemisphere", "mammal"))
+    raw = {"query": {"pages": {
+        "1": {"title": "File:Vulpes vulpes - 1864 - Print - Iconographia Zoologica - UBA01.tif",
+              "imageinfo": [{"thumburl": "https://thumb.example/fox1.jpg"}]},
+        "2": {"title": "File:Vulpes vulpes - 1870 - Print - Iconographia Zoologica - UBA02.tif",
+              "imageinfo": [{"thumburl": "https://thumb.example/fox2.jpg"}]},
+    }}}
+    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
     monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
 
-    assert datasources.get_animal(day)["common_name"] == "fox"
-    # Same slot, already cached — the veto must still force the next survivor.
-    assert datasources.get_animal(day, vetoed=["fox"])["common_name"] == "red fox"
-    assert datasources.cached_animal()["common_name"] == "red fox"
+    first = datasources.get_animal(day)
+    assert first["file"].startswith("File:Vulpes vulpes")
+    # Same slot, already cached — the veto must force a different image of
+    # the same animal, not skip the animal.
+    second = datasources.get_animal(day, vetoed=[first["file"]])
+    assert second["common_name"] == "fox"
+    assert second["file"] != first["file"]
+    assert datasources.cached_animal()["file"] == second["file"]
+    # Every plate vetoed: nothing to show, and the vetoed stale one isn't served.
+    assert datasources.get_animal(day, vetoed=[first["file"], second["file"]]) is None
 
+
+def test_cached_animal_without_file_is_refetched(data_dir, no_network, monkeypatch):
+    day = date(2026, 9, 17)
+    _pin(monkeypatch, day, ("fox", "Vulpes", "the Northern Hemisphere", "mammal"))
+    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: COMMONS_RAW)
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    a = datasources.get_animal(day)
+    old = dict(a); old.pop("file")
+    datasources._cache_write("animal.json", {"fetched_at": 0, "data": old})
+    assert datasources.get_animal(day)["file"] == a["file"]
 
 def test_icon_kind_covers_the_richer_glyph_set():
     assert datasources.icon_kind(51) == "drizzle"
@@ -498,3 +515,26 @@ def test_slot_for():
     assert datasources.slot_for(d, 7, 0) == d.toordinal() // 7
     assert datasources.slot_for(d, 7, 2) == d.toordinal() // 7 + 2
     assert datasources.slot_for(d, 0, 0) == d.toordinal()  # period 0 treated as 1
+
+
+def test_genus_must_lead_not_trail(data_dir, no_network, monkeypatch):
+    """'Papilio' is the butterflies — not the fish Pteraclis papilio, the
+    mudskipper variety 'ε Papilio', the snail Strombus papilio, or a
+    butterflyfish matched by the common name."""
+    day = date(2026, 9, 17)
+    _pin(monkeypatch, day, ("butterfly", "Papilio", "every continent but Antarctica", "invert"))
+    impostors = ["File:Pteraclis papilio - 1700-1880 - Print - Iconographia Zoologica.tif",
+                 "File:Periophthalmus koelreuteri var. ε Papilio - 1700-1880 - Print.tif",
+                 "File:Strombus papilio - - Print - Iconographia Zoologica.tif",
+                 "File:Butterflyfish - 1880 - Print.tif"]
+    real = "File:Papilio machaon - - Print - Iconographia Zoologica.tif"
+
+    def raw(titles):
+        return {"query": {"pages": {str(i): {"title": t, "imageinfo": [{"thumburl": "u"}]}
+                                    for i, t in enumerate(titles)}}}
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw(impostors))
+    assert datasources.get_animal(day) is None
+    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw(impostors + [real]))
+    a = datasources.get_animal(day)
+    assert a["file"] == real and a["sci_name"] == "Papilio machaon"

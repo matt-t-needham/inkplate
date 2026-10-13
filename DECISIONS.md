@@ -282,6 +282,33 @@ is lightly tinted (≈50), Brehm is pure monochrome wood engraving (0). The
 Spectra-6 palette renders the hand-coloured bird plates surprisingly well —
 a Gould toucan keeps its orange bill.
 
+## 20e. Genus must lead the binomial; vetoes are per image (2026-10-09)
+"Butterfly" (*Papilio*) showed a fish twice: the title match was a substring
+test, so a genus-only term matched any *epithet* — *Pteraclis papilio* (a
+fish), *Periophthalmus … ε Papilio* (a mudskipper), *Strombus papilio* (a
+snail) — and "butterfly" matched butterflyfish. 216 of the 228 entries are
+genus-only; a live sweep found impostor plates in 40 animals' pools (peacock
+→ wrasse *Crenilabrus pavo*, turkey → snake *Acontias meleagris*, hawk moth
+→ *Mandrillus sphinx*, porcupine → sea urchins…).
+
+Now a one-word term must lead the file name, or appear capitalised with a
+lowercase epithet after it; the common name must be a whole word. The
+substring genus fallback is gone. Some genuine plates filed under old
+binomials (*Canis vulpes*, *Camelopardalis giraffa*, *Rana bufo*) drop out
+of their pools; every animal still resolves.
+
+Re-swept all 228: seven no longer resolved. Moose → **Cervus alces**,
+chamois → **Antilope rupicapra**, gazelle → **Antilope gazella** (genuine
+plates under old binomials); shark → **Carcharias**, tropicbird →
+**Phaeton** (period spelling), scorpion → **Buthus** — these had only ever
+matched impostors (a flatworm, a hummingbird, a crab). **Dolphin removed**:
+its only matches were a fish louse and a microbe, and no corpus has a titled
+*Delphinus* plate. 227 entries, all verified.
+
+The pane's veto now bans the **image** (its Commons file title, kept in
+`vetoed_images`), not the animal — the animal is redrawn from another plate.
+Vetoes are permanent; the restore chips and `/api/unveto` are gone.
+
 ## 20d. Weather Icons font replaces the hand-drawn set (seventh pass)
 Swapped the drawn icons for **Weather Icons** by Erik Flowers (SIL OFL 1.1),
 vendored in `fonts/` so the image builds offline. Bake-off findings that are

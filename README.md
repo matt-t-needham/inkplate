@@ -32,7 +32,7 @@ the panel):
   Commons, rotating across seven corpuses: Iconographia Zoologica (Amsterdam,
   1700-1880, the reliable backstop), Gessner's 1551 *Historiae animalium*,
   Buffon (Paris, 1749), Brehm (Leipzig, 1863), and — birds — Catesby (1731),
-  Audubon (1827), Gould (1840). 228 animals with native ranges — land, air
+  Audubon (1827), Gould (1840). 227 animals with native ranges — land, air
   and a deep ocean section — every one verified to resolve; deterministic
   daily pick; auto-cropped, paper cleaned, drawn as a soft edge-faded
   background. Caption: *"Rhinoceros · Rhinoceros indicus · of South Asia · as
@@ -100,8 +100,12 @@ docker logs apps-inkplate-1 -f
   redraws at its next wake; in tethered mode that's within seconds.
 - **Next animal** — advances the daily animal for layout testing. Persisted
   as an offset, so the preview and the device stay in sync.
-- **Now showing** — the current animal and quote, each with a **Veto**
-  button (skipped from then on; restorable from the chips underneath).
+- **Next quote** — replaces today's quote with another (the current one is
+  in the shown-history, so it won't come back).
+- **Now showing** — the current animal and quote. **Veto image** bans that
+  Commons file for good (the animal stays in rotation, drawn from another
+  plate); **Veto quote** bans that quote for good. Neither can be undone from
+  the pane.
 - **Configuration** — screen picker, refresh cadence (how often the panel
   redraws — keeps the temperature current), animal cadence in days (default
   daily), weather and snow locations, tethered mode. Applies live;

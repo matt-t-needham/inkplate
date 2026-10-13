@@ -104,12 +104,6 @@
     border-radius:7px; padding:5px 12px; font:inherit; cursor:pointer;
   }
   button.danger:disabled, button.ghost:disabled { opacity:.5; cursor:default; }
-  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
-  .chip {
-    background:var(--bg); border:1px solid var(--surface1); border-radius:12px;
-    padding:1px 4px 1px 10px; font-size:12px; display:flex; align-items:center; gap:4px;
-  }
-  .chip button { background:none; border:none; color:var(--subtext); cursor:pointer; font:inherit; }
   .now-row .v.quote { font-weight:400; font-style:italic; font-family:Georgia, serif; }
   .msg { font-size:12px; } .msg.ok { color:var(--green); } .msg.err { color:var(--red); }
 
@@ -140,6 +134,7 @@
         </div>
         <button class="primary" id="btn-render">Render now → push</button>
         <button class="ghost" id="btn-cycle-animal">Next animal</button>
+        <button class="ghost" id="btn-cycle-quote">Next quote</button>
         <span class="push-note">push bumps the version; the device redraws at its next wake</span>
       </div>
       <div class="meta-line" id="render-meta">no render yet</div>
@@ -164,15 +159,13 @@
         <div class="k">Animal</div>
         <div class="v" id="now-animal">—</div>
         <div class="sub" id="now-animal-sub"></div>
-        <div class="btn-row"><button class="danger" id="btn-veto-animal">Veto animal</button></div>
-        <div class="chips" id="vetoed-animals"></div>
+        <div class="btn-row"><button class="danger" id="btn-veto-animal">Veto image</button></div>
       </div>
       <div class="now-row" style="margin-bottom:0">
         <div class="k">Quote <span id="now-q-date"></span></div>
         <div class="v quote" id="now-q">—</div>
         <div class="sub" id="now-q-attr"></div>
         <div class="btn-row"><button class="danger" id="btn-veto-q">Veto quote</button></div>
-        <div class="chips" id="vetoed-quotes"></div>
       </div>
     </div>
 
@@ -269,6 +262,7 @@ async function cycle(what, btn) {
   }
 }
 $('btn-cycle-animal').addEventListener('click', e => cycle('animal', e.target));
+$('btn-cycle-quote').addEventListener('click', e => cycle('quote', e.target));
 
 $('btn-save').addEventListener('click', async () => {
   const msg = $('save-msg');
@@ -302,7 +296,6 @@ $('btn-save').addEventListener('click', async () => {
   setTimeout(() => { msg.textContent = ''; }, 3000);
 });
 
-const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 function flash(el, text, ok) {
   el.textContent = text; el.className = 'msg ' + (ok ? 'ok' : 'err');
   setTimeout(() => { el.textContent = ''; }, 3000);
@@ -315,46 +308,28 @@ async function api(method, url, body) {
   return j;
 }
 
-// ── Now showing: veto + restore ──
-function chips(list, kind) {
-  return (list || []).map(n => {
-    const label = n.length > 60 ? n.slice(0, 57) + '…' : n;
-    return `<span class="chip" title="${esc(n)}">${esc(label)}<button data-kind="${kind}" data-restore="${esc(n)}" title="restore">✕</button></span>`;
-  }).join('');
-}
-
+// ── Now showing: veto ──
 function renderNow(cur) {
   if (!cur) return;
   const a = cur.animal;
   $('now-animal').textContent = a ? a.common_name : 'none cached yet';
   $('now-animal-sub').textContent = a ? [a.sci_name, a.year, a.artist].filter(Boolean).join(' · ') : '';
-  $('btn-veto-animal').disabled = !a;
-  $('vetoed-animals').innerHTML = chips(cur.vetoed_animals, 'animal');
+  $('btn-veto-animal').disabled = !(a && a.file);
   const q = cur.quote;
   $('now-q').textContent = q ? '“' + q.text + '”' : 'none chosen yet';
   $('now-q-attr').textContent = q ? '— ' + [q.author, q.work].filter(Boolean).join(', ') + ' (' + q.year + ')' : '';
   $('now-q-date').textContent = q && q.qotd_date ? '· Wikiquote QOTD ' + q.qotd_date : '';
   $('btn-veto-q').disabled = !q;
-  $('vetoed-quotes').innerHTML = chips(cur.vetoed_quotes, 'quote');
 }
 
-document.querySelectorAll('#vetoed-animals, #vetoed-quotes').forEach(el =>
-  el.addEventListener('click', async e => {
-    const b = e.target.closest('button[data-restore]'); if (!b) return;
-    try {
-      await api('POST', 'api/unveto', {[b.dataset.kind]: b.dataset.restore});
-      await loadState();
-    } catch (err) { alert('Restore failed: ' + err.message); }
-  }));
-
 async function veto(what, btn) {
-  if (!confirm(`Veto this ${what}? It will be skipped from now on (restorable below).`)) return;
+  const noun = what === 'animal' ? 'image' : what;
+  if (!confirm(`Veto this ${noun}? It's removed from rotation for good.`)) return;
   btn.disabled = true;
   try {
     await api('POST', 'api/veto', {what});
-    await loadState(); refreshPreviewImg();
   } catch (e) { alert('Veto failed: ' + e.message); }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; await loadState(); refreshPreviewImg(); }
 }
 $('btn-veto-animal').addEventListener('click', e => veto('animal', e.target));
 $('btn-veto-q').addEventListener('click', e => veto('quote', e.target));
