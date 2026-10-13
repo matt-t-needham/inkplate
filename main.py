@@ -75,6 +75,7 @@ async def api_state():
     return {
         "config": cfg,
         "screens": list(screens.SCREENS.keys()),
+        "portrait_layouts": list(screens.PORTRAIT_LAYOUTS),
         "render": renderer.meta(),
         "last_checkin": checkins[0] if checkins else None,
         "battery_percent": (state.battery_percent(checkins[0].get("battery_voltage"))
@@ -112,9 +113,10 @@ async def _rerender(why: str) -> dict:
 @app.post("/api/config")
 async def api_config(request: Request):
     body = await request.json()
-    allowed = {"refresh_minutes", "screen", "tethered", "tethered_poll_seconds",
-               "latitude", "longitude", "location_name", "show_now_playing",
-               "animal_period_days",
+    allowed = {"refresh_minutes", "screen", "rotation", "portrait_layout",
+               "tethered", "tethered_poll_seconds",
+               "latitude", "longitude", "location_name",
+               "show_quote", "animal_period_days",
                "show_snow", "snow_latitude", "snow_longitude", "snow_location_name"}
     changes = {k: v for k, v in body.items() if k in allowed}
     if not changes:

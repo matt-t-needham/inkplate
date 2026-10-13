@@ -13,7 +13,7 @@ arrived).
 
 ## The dashboard
 
-Four widgets, each failing independently (a dead API degrades one box, never
+Three widgets (plus the optional quote), each failing independently (a dead API degrades one box, never
 the panel):
 
 - **Weather** (Open-Meteo, keyless) — current temp in °C and °F, condition
@@ -22,12 +22,14 @@ the panel):
   snow, storm, hail), today's sunrise/sunset, and three days with low on the
   left and high on the right in both units. Location is set in the control
   pane (defaults to the HTPC's IP geolocation).
-- **Quote** — Wikiquote's Quote of the Day (`quotes.py`), always shown with
+- **Quote** (off by default — *Quote on panel* in the pane turns it back on)
+  — Wikiquote's Quote of the Day (`quotes.py`), always shown with
   who said it, the work, and the year. A quote is only used if it can be
   found on the author's Wikiquote page in a sourced section (never Disputed /
   Misattributed) with a year, fits in three lines, and hasn't been shown or
   vetoed; otherwise a replacement comes from the QOTD archive before
-  2026-10-07, so fallbacks can't collide with the live feed.
+  2026-10-07, so fallbacks can't collide with the live feed. With it off the
+  engraving takes the bottom of the panel.
 - **Animal engraving** — a daily historical animal print from Wikimedia
   Commons, rotating across seven corpuses: Iconographia Zoologica (Amsterdam,
   1700-1880, the reliable backstop), Gessner's 1551 *Historiae animalium*,
@@ -38,11 +40,6 @@ the panel):
   background. Caption: *"Rhinoceros · Rhinoceros indicus · of South Asia · as
   depicted by Conrad Gessner, Zürich, 1551"*. Falls back to yesterday's beast
   if Commons is down.
-- **Now playing** (optional, off by default) — the current track on the RAGE
-  channel from the "Whats Playing?" service. Only sensible on mains power
-  with a short cadence: a deep-sleeping device can't be told a song changed.
-  Thanks to content-hash versioning (below) enabling it doesn't waste
-  refreshes — the panel only redraws when the pixels actually changed.
 
 **Content-hash versioning:** `image_version` bumps only when the rendered
 frame's pixels differ from the previous render. The device does a ~100-byte
@@ -102,10 +99,17 @@ docker logs apps-inkplate-1 -f
   as an offset, so the preview and the device stay in sync.
 - **Now showing** — the current animal and quote, each with a **Veto**
   button (skipped from then on; restorable from the chips underneath).
-- **Configuration** — screen picker, refresh cadence (how often the panel
+- **Configuration** — screen picker, **panel rotation** (0/90/180/270°,
+  the panel's clockwise turn — 90° or 270° hangs it vertically and the
+  dashboard switches to its portrait layout; the device still receives a
+  native 1600×1200 frame, pre-turned, so nothing changes on the firmware
+  side), **portrait layout** (*hero*, the default: engraving centred with its caption
+  top-right, a symmetric weather band under it and the snow report in one
+  centred row along the bottom border; *stack*: weather and caption on top,
+  engraving below — see `docs/layouts/`), refresh cadence (how often the panel
   redraws — keeps the temperature current), animal cadence in days (default
-  daily), weather and snow locations, tethered mode. Applies live;
-  the device picks up cadence changes at its next check-in.
+  daily), quote on/off, weather and snow locations, tethered mode. Applies
+  live; the device picks up cadence changes at its next check-in.
 - **Device check-ins** — battery voltage, Wi-Fi signal, boot count, errors.
   The header badge turns red if the device misses ~2.5 wake windows.
 - **Server events** — render/config/error trail, so debugging needs no shell.

@@ -44,17 +44,6 @@ DEFAULT_SNOW_LONGITUDE = float(os.environ.get("INKPLATE_SNOW_LON", "-121.6649"))
 DEFAULT_SNOW_LOCATION_NAME = os.environ.get("INKPLATE_SNOW_LOCATION", "Mt. Hood Meadows")
 SNOW_TTL_S = int(os.environ.get("INKPLATE_SNOW_TTL_S", "3600"))
 WEATHER_TTL_S = int(os.environ.get("INKPLATE_WEATHER_TTL_S", "1800"))
-NOW_PLAYING_TTL_S = int(os.environ.get("INKPLATE_NOW_PLAYING_TTL_S", "90"))
-# When the now-playing widget is enabled, renders go stale this fast instead
-# of refresh_minutes (content-hash versioning means the device still only
-# redraws when the pixels actually changed).
-NOW_PLAYING_RENDER_TTL_S = int(os.environ.get("INKPLATE_NOW_PLAYING_RENDER_TTL_S", "120"))
-
-# The rage.bix "Whats Playing?" service on the host (the :3007 tenant).
-# The deployment sets the real LAN address via INKPLATE_RAGE_NOW_URL.
-RAGE_NOW_URL = os.environ.get("INKPLATE_RAGE_NOW_URL",
-                              "http://host.docker.internal:3007/api/now?channel=2")
-
 # Contact for the User-Agent sent to public APIs (Wikimedia asks for one).
 CONTACT = os.environ.get("INKPLATE_CONTACT", "https://github.com/matt-t-needham/inkplate")
 

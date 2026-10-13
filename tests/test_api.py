@@ -6,6 +6,7 @@ from PIL import Image
 
 import main
 import palette
+import screens
 import state
 
 
@@ -28,8 +29,10 @@ def test_index_served(client):
 
 def test_state_shape(client):
     st = client.get("/api/state").json()
-    assert set(st) == {"config", "screens", "render", "last_checkin", "checkins", "events",
-                       "current", "battery_percent"}
+    assert set(st) == {"config", "screens", "portrait_layouts", "render", "last_checkin",
+                       "checkins", "events", "current", "battery_percent"}
+    assert st["portrait_layouts"] == list(screens.PORTRAIT_LAYOUTS)
+    assert st["portrait_layouts"][0] == screens.DEFAULT_PORTRAIT_LAYOUT == "hero"
     assert "placeholder" in st["screens"]
     assert st["last_checkin"] is None
 
@@ -43,16 +46,35 @@ def test_config_update_and_validation(client):
     assert client.post("/api/config", json={"latitude": 91}).status_code == 400
     assert client.post("/api/config", json={"longitude": -200}).status_code == 400
     r = client.post("/api/config", json={"latitude": 51.5, "longitude": -0.12,
-                                         "location_name": "London", "show_now_playing": True})
+                                         "location_name": "London", "show_quote": True})
     assert r.status_code == 200
     cfg = r.json()
     assert (cfg["latitude"], cfg["longitude"]) == (51.5, -0.12)
     assert cfg["location_name"] == "London"
-    assert cfg["show_now_playing"] is True
+    assert cfg["show_quote"] is True
     r = client.post("/api/config", json={"show_snow": False,
                                          "snow_location_name": "Timberline"})
     assert r.status_code == 200 and r.json()["show_snow"] is False
     assert client.post("/api/config", json={"snow_latitude": 95}).status_code == 400
+
+
+def test_rotation_config_and_portrait_frame(client):
+    assert client.post("/api/config", json={"rotation": 45}).status_code == 400
+    assert client.post("/api/config", json={"portrait_layout": "sideways"}).status_code == 400
+    r = client.post("/api/config", json={"rotation": 90, "portrait_layout": "hero",
+                                         "show_quote": True})
+    assert r.status_code == 200
+    cfg = r.json()
+    assert (cfg["rotation"], cfg["portrait_layout"], cfg["show_quote"]) == (90, "hero", True)
+
+    # The device frame is always the panel's native 1600x1200, whatever the
+    # hanging; the previews are upright (portrait) so the pane shows the wall.
+    r = client.get("/api/display.png")
+    assert Image.open(io.BytesIO(r.content)).size == (1600, 1200)
+    for mode in ("raw", "dithered", "panel"):
+        r = client.get(f"/api/preview.png?mode={mode}")
+        assert Image.open(io.BytesIO(r.content)).size == (1200, 1600), mode
+    assert client.get("/api/state").json()["render"]["rotation"] == 90
 
 
 def test_render_bumps_version_and_logs_event(client):
