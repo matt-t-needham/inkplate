@@ -42,9 +42,6 @@ DEFAULT_CONFIG = {
     "latitude": config.DEFAULT_LATITUDE,
     "longitude": config.DEFAULT_LONGITUDE,
     "location_name": config.DEFAULT_LOCATION_NAME,
-    # Now-playing widget (rage.bix). Off by default: at battery cadences the
-    # song is stale anyway; enable on mains power with a short cadence.
-    "show_now_playing": False,
     # Snow report (seasonal): its own location, independent of the weather's.
     "show_snow": True,
     "snow_latitude": config.DEFAULT_SNOW_LATITUDE,
@@ -161,8 +158,6 @@ def update_config(**changes) -> dict:
     if "show_snow" in changes:
         cfg["show_snow"] = bool(changes["show_snow"])
 
-    if "show_now_playing" in changes:
-        cfg["show_now_playing"] = bool(changes["show_now_playing"])
     if "animal_offset" in changes:
         cfg["animal_offset"] = int(changes["animal_offset"])
     if "animal_period_days" in changes:

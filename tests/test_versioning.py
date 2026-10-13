@@ -30,21 +30,10 @@ def test_content_change_bumps(data_dir):
     assert renderer.render()["image_version"] == v1 + 1
 
 
-def test_ensure_fresh_uses_fast_ttl_with_now_playing(data_dir, fake_data, monkeypatch):
-    import config
-    import time as _time
+def test_ensure_fresh_respects_refresh_cadence(data_dir, fake_data):
     state.update_config(screen="alignment", refresh_minutes=60)
     m1 = renderer.ensure_fresh()
-
-    # Within the hour: no re-render normally.
-    assert renderer.ensure_fresh()["rendered_at"] == m1["rendered_at"]
-
-    # With now-playing on, the render TTL shrinks to NOW_PLAYING_RENDER_TTL_S.
-    state.update_config(show_now_playing=True)
-    monkeypatch.setattr(config, "NOW_PLAYING_RENDER_TTL_S", 0)
-    m2 = renderer.ensure_fresh()
-    assert m2["rendered_at"] >= m1["rendered_at"]
-    assert m2["rendered_at"] != m1["rendered_at"]
+    assert renderer.ensure_fresh()["rendered_at"] == m1["rendered_at"]  # within the hour
 
 
 def test_rotation_turns_the_device_frame_not_the_preview(data_dir):

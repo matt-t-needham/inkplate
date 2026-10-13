@@ -13,7 +13,7 @@ arrived).
 
 ## The dashboard
 
-Four widgets, each failing independently (a dead API degrades one box, never
+Three widgets (plus the optional quote), each failing independently (a dead API degrades one box, never
 the panel):
 
 - **Weather** (Open-Meteo, keyless) — current temp in °C and °F, condition
@@ -40,11 +40,6 @@ the panel):
   background. Caption: *"Rhinoceros · Rhinoceros indicus · of South Asia · as
   depicted by Conrad Gessner, Zürich, 1551"*. Falls back to yesterday's beast
   if Commons is down.
-- **Now playing** (optional, off by default) — the current track on the RAGE
-  channel from the "Whats Playing?" service. Only sensible on mains power
-  with a short cadence: a deep-sleeping device can't be told a song changed.
-  Thanks to content-hash versioning (below) enabling it doesn't waste
-  refreshes — the panel only redraws when the pixels actually changed.
 
 **Content-hash versioning:** `image_version` bumps only when the rendered
 frame's pixels differ from the previous render. The device does a ~100-byte
@@ -109,9 +104,9 @@ docker logs apps-inkplate-1 -f
   dashboard switches to its portrait layout; the device still receives a
   native 1600×1200 frame, pre-turned, so nothing changes on the firmware
   side), **portrait layout** (*hero*, the default: engraving centred in the top
-  two thirds with its caption overlaid bottom-right, weather band along the
-  bottom; *stack*: weather and caption on top, engraving below — see
-  `docs/layouts/`), refresh cadence (how often the panel
+  two thirds with its caption overlaid top-right, weather bottom-left and the
+  snow report right-justified beside it; *stack*: weather and caption on top,
+  engraving below — see `docs/layouts/`), refresh cadence (how often the panel
   redraws — keeps the temperature current), animal cadence in days (default
   daily), quote on/off, weather and snow locations, tethered mode. Applies
   live; the device picks up cadence changes at its next check-in.

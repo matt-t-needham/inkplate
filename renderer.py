@@ -115,10 +115,7 @@ def ensure_fresh() -> dict:
     older than the refresh cadence. Returns current meta."""
     cfg = state.load_config()
     m = meta()
-    # With now-playing enabled the render (not the device) refreshes fast —
-    # content-hash versioning means the device still only redraws on change.
-    ttl_s = (config.NOW_PLAYING_RENDER_TTL_S if cfg.get("show_now_playing")
-             else cfg["refresh_minutes"] * 60)
+    ttl_s = cfg["refresh_minutes"] * 60
     stale = (
         m is None
         or m.get("screen") != cfg["screen"]

@@ -44,12 +44,12 @@ def test_config_update_and_validation(client):
     assert client.post("/api/config", json={"latitude": 91}).status_code == 400
     assert client.post("/api/config", json={"longitude": -200}).status_code == 400
     r = client.post("/api/config", json={"latitude": 51.5, "longitude": -0.12,
-                                         "location_name": "London", "show_now_playing": True})
+                                         "location_name": "London", "show_quote": True})
     assert r.status_code == 200
     cfg = r.json()
     assert (cfg["latitude"], cfg["longitude"]) == (51.5, -0.12)
     assert cfg["location_name"] == "London"
-    assert cfg["show_now_playing"] is True
+    assert cfg["show_quote"] is True
     r = client.post("/api/config", json={"show_snow": False,
                                          "snow_location_name": "Timberline"})
     assert r.status_code == 200 and r.json()["show_snow"] is False

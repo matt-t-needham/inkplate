@@ -141,22 +141,6 @@ def test_animal_none_when_nothing_cached(data_dir, no_network, monkeypatch):
     assert datasources.get_animal(date(2026, 9, 17)) is None
 
 
-def test_now_playing_parse(data_dir, no_network, monkeypatch):
-    raw = {"artist": "Magic Dirt", "song": "Watch Out Boys", "album": "Tough Love",
-           "year": "2003", "channel_name": "RAGE", "position": 145}
-    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
-    np = datasources.get_now_playing()
-    assert np == {"artist": "Magic Dirt", "song": "Watch Out Boys",
-                  "year": "2003", "channel_name": "RAGE"}
-
-
-def test_now_playing_none_when_down(data_dir, no_network, monkeypatch):
-    def fail(*a, **k):
-        raise RuntimeError("rage down")
-    monkeypatch.setattr(datasources, "_get_json", fail)
-    assert datasources.get_now_playing() is None
-
-
 def test_animal_skips_anatomical_plates(data_dir, no_network, monkeypatch):
     day = date(2026, 9, 17)
     _pin(monkeypatch, day, ("sloth", "Bradypus", "Central & South America", "mammal"))

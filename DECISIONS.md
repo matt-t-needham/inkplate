@@ -201,11 +201,17 @@ they can be compared on the wall rather than argued about from mockups:
   (weather left; now-playing and the snow report right), the top two thirds
   are the art section. The plate is centred there on its **ink centroid**,
   not its bounding box (a heron is a big body under a thin neck; the eye
-  centres the body), clamped inside the section. Nothing overlaps it except
-  its own caption, so the long edge fades go: a 36 px softening only. The
-  caption sits in the section's bottom-right corner, on the art, and where
-  the two meet the art is lightened under it with a feathered white patch
-  (`_fade_behind`) — fade the image for the text, not the whole edge.
+  centres the body), clamped inside the section. The long edge fades go: a
+  36 px softening only. The caption sits top-right, on the art. The weather
+  block was cramped in a 440 px band, so its rows are spread 48 px further
+  apart and it climbs that far into the art section's bottom edge; the snow
+  report is right-justified beside it. Anything laid over the art — caption,
+  weather — is measured first and the art lightened under it with a
+  feathered white patch (`_fade_behind`): fade the image for the text, not
+  the whole edge.
+
+**Now-playing is gone** (fetcher, config flag, fast render TTL, pane
+checkbox). Matt will never use it on the wall; §18 stays as history.
 - *stack*: the landscape arrangement folded — weather top-left, caption
   top-right, engraving across the lower two thirds, snow bottom-left over the
   art's faded edge. Kept as the alternative.

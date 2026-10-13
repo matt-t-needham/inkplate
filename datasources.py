@@ -663,19 +663,3 @@ def get_animal(day: date | None = None, offset: int = 0,
             and meta["data"].get("common_name") not in vetoed):
         return meta["data"]  # yesterday's beast beats no beast (unless vetoed)
     return None
-
-
-# ── now playing (rage.bix, LAN) ───────────────────────────────────────────────
-
-def get_now_playing() -> dict | None:
-    """Current track on the RAGE channel. Cached briefly; None if the service
-    is down and there's no recent cache (the widget simply doesn't draw)."""
-    def fetch():
-        raw = _get_json(config.RAGE_NOW_URL, timeout=5.0)
-        return {
-            "artist": raw.get("artist") or "",
-            "song": raw.get("song") or raw.get("basename", ""),
-            "year": str(raw.get("year") or ""),
-            "channel_name": raw.get("channel_name") or "RAGE",
-        }
-    return _cached_fetch("now_playing.json", config.NOW_PLAYING_TTL_S, fetch, "now-playing")

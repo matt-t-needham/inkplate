@@ -115,7 +115,7 @@ async def api_config(request: Request):
     body = await request.json()
     allowed = {"refresh_minutes", "screen", "rotation", "portrait_layout",
                "tethered", "tethered_poll_seconds",
-               "latitude", "longitude", "location_name", "show_now_playing",
+               "latitude", "longitude", "location_name",
                "show_quote", "animal_period_days",
                "show_snow", "snow_latitude", "snow_longitude", "snow_location_name"}
     changes = {k: v for k, v in body.items() if k in allowed}

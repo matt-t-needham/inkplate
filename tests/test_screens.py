@@ -14,7 +14,7 @@ def test_dashboard_portrait_layouts(data_dir, fake_data):
     import state
     assert screens.DEFAULT_PORTRAIT_LAYOUT in screens.PORTRAIT_LAYOUTS
     for layout in screens.PORTRAIT_LAYOUTS:
-        state.update_config(portrait_layout=layout, show_snow=True, show_now_playing=True)
+        state.update_config(portrait_layout=layout, show_snow=True)
         img = screens.dashboard(1200, 1600)
         assert img.size == (1200, 1600), layout
     # Every layout also has a quote slot when the quote is switched back on.
@@ -35,7 +35,7 @@ def test_hero_centres_the_plate_in_the_top_section(data_dir, fake_data):
     sheet.save(fake_data["animal"]["path"])
     state.update_config(portrait_layout="hero", show_snow=True)
     img = screens.dashboard(1200, 1600)
-    xs = [x for x in range(0, 1200, 4) for y in range(60, 940, 8)   # above the caption
+    xs = [x for x in range(0, 1200, 4) for y in range(200, 940, 8)  # between caption and weather
           if img.getpixel((x, y))[0] < 100]
     assert xs, "no ink in the art section"
     centre = (min(xs) + max(xs)) / 2
@@ -91,30 +91,11 @@ def test_dashboard_survives_every_source_down(data_dir, monkeypatch):
     import datasources
     monkeypatch.setattr(datasources, "get_weather", lambda lat, lon: None)
     monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): None)
-    monkeypatch.setattr(datasources, "get_now_playing", lambda: None)
     monkeypatch.setattr(datasources, "get_snow", lambda lat, lon: None)
     import quotes
     monkeypatch.setattr(quotes, "get_quote", lambda day=None, fits=None, vetoed=(): None)
     img = screens.dashboard(1600, 1200)
     assert img.size == (1600, 1200)  # degraded, never blank/crashed
-
-
-def test_dashboard_now_playing_only_when_enabled(data_dir, fake_data, monkeypatch):
-    import state
-
-    calls = []
-    import datasources
-    real = datasources.get_now_playing
-    monkeypatch.setattr(datasources, "get_now_playing",
-                        lambda: calls.append(1) or real())
-
-    state.update_config(show_now_playing=False)
-    screens.dashboard(400, 300)
-    assert calls == []
-
-    state.update_config(show_now_playing=True)
-    screens.dashboard(400, 300)
-    assert calls == [1]
 
 
 def test_weather_icon_kinds_all_drawable():
