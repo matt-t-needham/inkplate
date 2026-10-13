@@ -103,9 +103,9 @@ docker logs apps-inkplate-1 -f
   the panel's clockwise turn — 90° or 270° hangs it vertically and the
   dashboard switches to its portrait layout; the device still receives a
   native 1600×1200 frame, pre-turned, so nothing changes on the firmware
-  side), **portrait layout** (*hero*, the default: engraving centred in the top
-  two thirds with its caption overlaid top-right, weather bottom-left and the
-  snow report right-justified beside it; *stack*: weather and caption on top,
+  side), **portrait layout** (*hero*, the default: engraving centred with its caption
+  top-right, a symmetric weather band under it and the snow report in one
+  centred row along the bottom border; *stack*: weather and caption on top,
   engraving below — see `docs/layouts/`), refresh cadence (how often the panel
   redraws — keeps the temperature current), animal cadence in days (default
   daily), quote on/off, weather and snow locations, tethered mode. Applies

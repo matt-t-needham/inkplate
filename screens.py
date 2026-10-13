@@ -363,9 +363,10 @@ def _sun_horizon(d: ImageDraw.ImageDraw, x: int, y: int, size: int, rising: bool
 # knows). Portrait has two arrangements, picked in the pane:
 #
 #   hero  — (default) the engraving sits centred in the top two thirds with
-#           its caption overlaid top-right; the weather climbs a little into
-#           the art's bottom edge and the snow report sits right-justified
-#           beside it. Text that meets the art fades the art locally under it.
+#           its caption overlaid top-right; below it a symmetric weather band
+#           (temperature centred; forecast block left, rise/set block right)
+#           and, along the bottom border, a centred snow row. With snow off
+#           the band drops to the border and the art grows into the room.
 #   stack — weather top-left, caption top-right, the engraving fills the lower
 #           two thirds; snow report bottom-left over the art's faded edge.
 
@@ -380,16 +381,17 @@ WEATHER_BLOCK_H = 440      # top of the glyph row to the bottom of the °F line
 # 1200, so the caption can't share that row as it does in landscape — it
 # tucks under the HIGH temperature instead, right-aligned.
 PORTRAIT_CAPTION_TOP = 196
-# Hero: the bottom third is the weather band (weather left, snow report
-# right-justified); everything above the band, inside HERO_MARGIN, is the
-# art section. Centred art has no edge to bleed off, so it gets only a soft
-# HERO_FADE on every side — enough to hide the crop line, not a dissolve.
-# The weather rows are spread HERO_WEATHER_SPREAD px further apart than in
-# landscape (the band was cramped) and the block climbs by that much into
-# the art section's bottom edge.
+# Hero: a centred composition. The weather band (_draw_weather_centred,
+# HERO_WEATHER_H tall) sits on the snow row (_snow_foot, HERO_SNOW_H tall)
+# or, with snow off, on the bottom margin; everything above, inside
+# HERO_MARGIN, is the art section. Centred art has no edge to bleed off, so
+# it gets only a soft HERO_FADE on every side — enough to hide the crop
+# line, not a dissolve.
 HERO_MARGIN = 40
 HERO_FADE = 36
-HERO_WEATHER_SPREAD = 48
+HERO_WEATHER_H = 340       # centred temperature row + forecast / rise-set row
+HERO_SNOW_H = 118          # location label over one row of figures
+HERO_BAND_HALF = 360       # the forecast and rise/set blocks hug ±this of centre
 # Text that sits on the art (caption, weather) has the art lightened under
 # it — a feathered white patch — so it reads without a heavy halo.
 CAPTION_FADE_STRENGTH = 0.82
@@ -477,18 +479,16 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
     right = width - X(48)
 
     if layout == "hero":
-        # Bottom band first (it sets how much room the art gets above it).
-        band_bottom = height - Y(52)
+        # Build upwards from the bottom border: snow row (optional), weather
+        # band, then the art takes whatever is left above.
+        bottom = height - Y(52)
         if data["quote"]:
-            band_bottom = _draw_quote(ImageDraw.Draw(img), data["quote"], LX,
-                                      band_bottom, X, Y, halo) - Y(40)
-        # The art section ends where a landscape-spaced weather block would
-        # start; the spread block starts higher, climbing into the art.
-        spread = HERO_WEATHER_SPREAD
-        band_top = band_bottom - Y(WEATHER_BLOCK_H + 2 * spread)
+            bottom = _draw_quote(ImageDraw.Draw(img), data["quote"], LX,
+                                 bottom, X, Y, halo) - Y(40)
+        snow_top = bottom - Y(HERO_SNOW_H) if data["snow"] else bottom
+        band_top = (snow_top - Y(28) if data["snow"] else bottom) - Y(HERO_WEATHER_H)
         m = X(HERO_MARGIN)
-        box = (m, Y(HERO_MARGIN), width - m,
-               band_bottom - Y(WEATHER_BLOCK_H) - Y(HERO_MARGIN))
+        box = (m, Y(HERO_MARGIN), width - m, band_top - Y(24))
         art_rect = _draw_art(img, data["animal"], box, X, Y, mode="centered")
         d = ImageDraw.Draw(img)
         # Anything laid over the art is measured first (drawn into a 1px
@@ -506,15 +506,12 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
             cap_w = max(d.textlength(ln, font=f_cap) for ln in lines)
             over_art((int(right - cap_w), cap_top, right, cap_top + Y(34) * len(lines)))
             _draw_caption_lines(d, lines, f_cap, right, cap_top, Y, halo)
-        over_art(_draw_weather(dry, data["weather"], LX, band_top, X, Y, halo,
-                               spread=spread))
-        _draw_weather(d, data["weather"], LX, band_top, X, Y, halo, spread=spread)
+        cx = width // 2
+        over_art(_draw_weather_centred(dry, data["weather"], cx, band_top, X, Y, halo))
+        _draw_weather_centred(d, data["weather"], cx, band_top, X, Y, halo)
         if data["snow"]:
-            args = (data["snow"], X, Y, halo)
-            over_art(_snow_report(dry, right, band_bottom, *args,
-                                  name=cfg["snow_location_name"], align="right"))
-            _snow_report(d, right, band_bottom, *args,
-                         name=cfg["snow_location_name"], align="right")
+            _snow_foot(d, cx, bottom, data["snow"], X, Y, halo,
+                       name=cfg["snow_location_name"])
         return img
 
     # stack: the landscape arrangement folded — info on top, art below.
@@ -727,6 +724,108 @@ def _draw_weather(d: ImageDraw.ImageDraw, weather: dict | None, LX: int, top: in
                f"{_c_to_f(day['tmin'])} / {_c_to_f(day['tmax'])} °F",
                font=_font(Y(22)), fill=BLACK, **halo)
     return (LX, top, max(x_end, LX + X(2 * 256)), P(452) + Y(28))
+
+
+def _draw_weather_centred(d: ImageDraw.ImageDraw, weather: dict | None, cx: int,
+                          top: int, X, Y, halo):
+    """The hero band: today's forecast glyph, current temperature and HIGH
+    centred as one row; under it two grouped blocks hugging ±HERO_BAND_HALF
+    of centre — the next two days on the left, sunrise over sunset on the
+    right. HERO_WEATHER_H tall. Returns the band's rectangle."""
+    left, right = cx - X(HERO_BAND_HALF), cx + X(HERO_BAND_HALF)
+    rect = (left, top, right, top + Y(HERO_WEATHER_H))
+    if not (weather and weather.get("days")):
+        f = _font(Y(40), style="display")
+        txt = "weather unavailable"
+        d.text((cx - d.textlength(txt, font=f) / 2, top + Y(60)), txt, font=f,
+               fill=RED, **halo)
+        return rect
+    today = weather["days"][0]
+
+    # Row 1, centred: glyph · 21° · HIGH 28°
+    kind = datasources.icon_kind(today["code"])
+    iw = _weather_icon_width(d, Y(58), kind)
+    w_cur = _temp_cf(d, 0, 0, weather["current_c"], Y(124), BLACK, halo, measure=True)
+    w_hi = _temp_cf(d, 0, 0, today["tmax"], Y(60), RED, halo, measure=True)
+    x = cx - (iw + X(28) + w_cur + X(44) + w_hi) // 2
+    _weather_icon(d, x + iw // 2, top + Y(84), Y(58), kind)
+    x += iw + X(28)
+    x += _temp_cf(d, x, top, weather["current_c"], Y(124), BLACK, halo) + X(44)
+    d.text((x, top + Y(16)), "HIGH", font=_font(Y(20), style="display"), fill=BLACK, **halo)
+    _temp_cf(d, x, top + Y(46), today["tmax"], Y(60), RED, halo)
+
+    # Row 2, left block: the next two days (glyph + weekday, low / high, °F).
+    ry = top + Y(206)
+    f_day = _font(Y(28), style="display")
+    x = left
+    for day in weather["days"][1:3]:
+        dk = datasources.icon_kind(day["code"])
+        dw = _weather_icon_width(d, Y(28), dk)
+        _weather_icon(d, x + dw // 2, ry + Y(16), Y(28), dk)
+        d.text((x + dw + X(12), ry), _dow(day["date"]), font=f_day, fill=BLACK, **halo)
+        lo, hi = str(round(day["tmin"])), str(round(day["tmax"]))
+        wl = _deg(d, x, ry + Y(52), lo, Y(36), BLUE, halo=halo)
+        _deg(d, x + wl + X(16), ry + Y(52), hi, Y(36), RED, halo=halo)
+        d.text((x, ry + Y(104)), f"{_c_to_f(day['tmin'])} / {_c_to_f(day['tmax'])} °F",
+               font=_font(Y(20)), fill=BLACK, **halo)
+        x += X(210)
+
+    # Row 2, right block: sunrise over sunset, times flush right, glyphs in
+    # a column (both times measured so the glyphs line up).
+    f_t = _font(Y(28), style="display")
+    gsz = Y(56)
+    gw = _glyph_width(d, WI_SUNRISE, gsz)
+    times = ((_hhmm(today["sunrise"]), True), (_hhmm(today["sunset"]), False))
+    tw = max(d.textlength(t, font=f_t) for t, _ in times)
+    gx = right - tw - X(12) - gw // 2
+    for i, (txt, rising) in enumerate(times):
+        yy = ry + i * Y(66)
+        _sun_horizon(d, gx, yy + Y(16), gsz, rising)
+        d.text((right - d.textlength(txt, font=f_t), yy), txt, font=f_t, fill=BLACK, **halo)
+    return rect
+
+
+def _snow_foot(d: ImageDraw.ImageDraw, cx: int, bottom: int, snow, X, Y, halo,
+               name: str = ""):
+    """The hero snow row, centred on cx with its bottom at `bottom`: base and
+    72 h figures, then the three coming days as forecast glyph with the cm
+    amount (blue when heavy) over the weekday; the location label centred
+    above with clear air under it. HERO_SNOW_H tall. Returns its rectangle."""
+    f_big = _font(Y(36), style="display")
+    f_amt = _font(Y(28), style="display")
+    f_s = _font(Y(19), style="display")
+    depth, recent = _cm(snow.get("depth_cm")), _cm(snow.get("recent_cm"))
+    items = [(None, str(depth), "CM BASE", 0), (None, f"+{recent}", "CM · 3D", 0)]
+    for dy in (snow.get("days") or [])[:3]:
+        cm = _cm(dy.get("snow_cm"))
+        items.append((datasources.icon_kind(dy.get("code")), f"{cm}cm",
+                      _dow(dy.get("date")).upper(), cm))
+    widths = []
+    for k, big, lab, _ in items:
+        fw = f_big if k is None else f_amt
+        widths.append((_weather_icon_width(d, Y(22), k) + X(6) if k else 0)
+                      + max(d.textlength(big, font=fw), d.textlength(lab, font=f_s)))
+    total = sum(widths) + X(44) * (len(items) - 1)
+    fy = bottom - Y(60)             # top of the figures line
+    x = cx - total // 2
+    top = fy - Y(6)
+    if name:
+        top = fy - Y(52)
+        d.text((cx - d.textlength(name, font=f_s) / 2, top), name, font=f_s,
+               fill=BLACK, **halo)
+    for (k, big, lab, cm), w in zip(items, widths):
+        xx = x
+        if k:
+            iw = _weather_icon_width(d, Y(22), k)
+            _weather_icon(d, xx + iw // 2, fy + Y(16), Y(22), k)
+            xx += iw + X(6)
+            d.text((xx, fy), big, font=f_amt,
+                   fill=BLUE if cm >= SNOW_HEAVY_CM else BLACK, **halo)
+        else:
+            d.text((xx, fy - Y(8)), big, font=f_big, fill=BLACK, **halo)
+        d.text((xx, fy + Y(32)), lab, font=f_s, fill=BLACK, **halo)
+        x += w + X(44)
+    return (cx - total // 2, top, cx + total // 2, bottom)
 
 
 def _draw_quote(d: ImageDraw.ImageDraw, quote: dict, LX: int, bottom: int,
