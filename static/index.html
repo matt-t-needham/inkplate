@@ -47,6 +47,11 @@
     width:100%; aspect-ratio:4/3; object-fit:contain; border-radius:6px;
     background:#11111b; display:block; border:1px solid var(--surface1);
   }
+  /* Panel hung vertically: previews are upright (what's on the wall), so the
+     box turns with it — kept to a sane height instead of the full column. */
+  #preview-img.portrait {
+    aspect-ratio:3/4; width:auto; max-width:100%; height:min(78vh, 900px); margin:0 auto;
+  }
   .preview-bar { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
   .seg { display:flex; border:1px solid var(--surface1); border-radius:7px; overflow:hidden; }
   .seg button {
@@ -172,6 +177,14 @@
     <div class="card">
       <h2>Configuration</h2>
       <div class="field"><label for="f-screen">Screen</label><select id="f-screen"></select></div>
+      <div class="field"><label for="f-rotation" title="How the panel is hung: degrees turned clockwise from landscape. 90°/270° draw the dashboard portrait; the device still receives its native 1600×1200 frame, pre-turned.">Panel rotation</label>
+        <select id="f-rotation">
+          <option value="0">0° · landscape</option>
+          <option value="90">90° · portrait</option>
+          <option value="180">180° · upside down</option>
+          <option value="270">270° · portrait</option>
+        </select></div>
+      <div class="field" id="field-portrait-layout"><label for="f-portrait-layout" title="hero: engraving centred above a symmetric weather band (temperature centred, forecast left, sunrise/sunset right) and a centred snow row along the bottom border. stack: weather and caption on top, engraving below.">Portrait layout</label><select id="f-portrait-layout"></select></div>
       <div class="field"><label for="f-refresh" title="How often the panel itself redraws — governs how fresh the temperature is.">Refresh cadence (min)</label><input id="f-refresh" type="number" min="1" max="1440"></div>
       <div class="field"><label for="f-animal-period" title="How often a new engraving is chosen.">Animal cadence (days)</label><input id="f-animal-period" type="number" min="1" max="365"></div>
       <div class="field"><label for="f-tethered">Tethered mode (no deep sleep)</label><input id="f-tethered" type="checkbox"></div>
@@ -179,7 +192,7 @@
       <div class="field"><label for="f-location">Weather location</label><input id="f-location" type="text" maxlength="60" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:6px 8px;font:inherit"></div>
       <div class="field"><label for="f-lat">Latitude</label><input id="f-lat" type="number" step="0.0001" min="-90" max="90"></div>
       <div class="field"><label for="f-lon">Longitude</label><input id="f-lon" type="number" step="0.0001" min="-180" max="180"></div>
-      <div class="field"><label for="f-nowplaying" title="Draws the current RAGE track. Only sensible on mains power with a short cadence — the device still only redraws when pixels change.">Now playing (rage.bix)</label><input id="f-nowplaying" type="checkbox"></div>
+      <div class="field"><label for="f-quote" title="Draws Wikiquote's quote of the day along the bottom border. Off, the engraving takes the room; the quote card below keeps working either way.">Quote on panel</label><input id="f-quote" type="checkbox"></div>
       <div class="field" style="margin-top:16px"><label for="f-snow" title="Seasonal: turn off when the lifts close — the line disappears and nothing is fetched.">Snow report</label><input id="f-snow" type="checkbox"></div>
       <div class="field"><label for="f-snow-name">Snow location</label><input id="f-snow-name" type="text" maxlength="60" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:6px 8px;font:inherit"></div>
       <div class="field"><label for="f-snow-lat">Snow latitude</label><input id="f-snow-lat" type="number" step="0.0001" min="-90" max="90"></div>
@@ -272,6 +285,9 @@ $('btn-save').addEventListener('click', async () => {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         screen: $('f-screen').value,
+        rotation: parseInt($('f-rotation').value, 10),
+        portrait_layout: $('f-portrait-layout').value,
+        show_quote: $('f-quote').checked,
         refresh_minutes: parseInt($('f-refresh').value, 10),
         tethered: $('f-tethered').checked,
         tethered_poll_seconds: parseInt($('f-poll').value, 10),
@@ -279,7 +295,6 @@ $('btn-save').addEventListener('click', async () => {
         location_name: $('f-location').value,
         latitude: parseFloat($('f-lat').value),
         longitude: parseFloat($('f-lon').value),
-        show_now_playing: $('f-nowplaying').checked,
         show_snow: $('f-snow').checked,
         snow_location_name: $('f-snow-name').value,
         snow_latitude: parseFloat($('f-snow-lat').value),
@@ -318,7 +333,8 @@ function renderNow(cur) {
   const q = cur.quote;
   $('now-q').textContent = q ? '“' + q.text + '”' : 'none chosen yet';
   $('now-q-attr').textContent = q ? '— ' + [q.author, q.work].filter(Boolean).join(', ') + ' (' + q.year + ')' : '';
-  $('now-q-date').textContent = q && q.qotd_date ? '· Wikiquote QOTD ' + q.qotd_date : '';
+  $('now-q-date').textContent = (q && q.qotd_date ? '· Wikiquote QOTD ' + q.qotd_date : '') +
+    (stateCache && !stateCache.config.show_quote ? ' · not drawn on the panel' : '');
   $('btn-veto-q').disabled = !q;
 }
 
@@ -352,10 +368,13 @@ function renderState(st) {
 
   // render meta
   const m = st.render;
+  const rot = m ? (m.rotation || 0) : st.config.rotation;
   $('render-meta').innerHTML = m
     ? `screen <b>${m.screen}</b> · version <b>${m.image_version}</b> · rendered <b>${fmtTs(m.rendered_at)}</b>` +
-      ` (${ago(m.rendered_at)}) · <b>${m.render_ms}ms</b> · ${m.width}×${m.height}`
+      ` (${ago(m.rendered_at)}) · <b>${m.render_ms}ms</b> · ${m.width}×${m.height}` +
+      (rot ? ` · turned <b>${rot}°</b>` : '')
     : 'no render yet';
+  $('preview-img').classList.toggle('portrait', rot === 90 || rot === 270);
 
   // config form — don't clobber fields the user is editing
   const focused = document.activeElement && document.activeElement.id;
@@ -364,6 +383,13 @@ function renderState(st) {
     sel.innerHTML = st.screens.map(s => `<option value="${s}">${s}</option>`).join('');
   }
   if (focused !== 'f-screen') sel.value = st.config.screen;
+  const pl = $('f-portrait-layout');
+  if (pl.options.length !== st.portrait_layouts.length) {
+    pl.innerHTML = st.portrait_layouts.map(s => `<option value="${s}">${s}</option>`).join('');
+  }
+  if (focused !== 'f-portrait-layout') pl.value = st.config.portrait_layout;
+  if (focused !== 'f-rotation') $('f-rotation').value = st.config.rotation;
+  $('f-quote').checked = st.config.show_quote;
   if (focused !== 'f-refresh') $('f-refresh').value = st.config.refresh_minutes;
   $('f-tethered').checked = st.config.tethered;
   if (focused !== 'f-poll') $('f-poll').value = st.config.tethered_poll_seconds;
@@ -371,7 +397,6 @@ function renderState(st) {
   if (focused !== 'f-location') $('f-location').value = st.config.location_name;
   if (focused !== 'f-lat') $('f-lat').value = st.config.latitude;
   if (focused !== 'f-lon') $('f-lon').value = st.config.longitude;
-  $('f-nowplaying').checked = st.config.show_now_playing;
   $('f-snow').checked = st.config.show_snow;
   if (focused !== 'f-snow-name') $('f-snow-name').value = st.config.snow_location_name;
   if (focused !== 'f-snow-lat') $('f-snow-lat').value = st.config.snow_latitude;

@@ -47,9 +47,6 @@ FAKE_QUOTE = {"text": "The reports of my death are greatly exaggerated.",
               "author": "Mark Twain", "work": "New York Journal", "year": "1897",
               "qotd_date": "2015-06-02", "key": "thereportsofmydeath"}
 
-FAKE_NOW = {"artist": "Magic Dirt", "song": "Watch Out Boys", "year": "2003",
-            "channel_name": "RAGE"}
-
 
 @pytest.fixture()
 def fake_data(tmp_path, monkeypatch):
@@ -69,9 +66,8 @@ def fake_data(tmp_path, monkeypatch):
 
     monkeypatch.setattr(datasources, "get_weather", lambda lat, lon: FAKE_WEATHER)
     monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): fake_animal)
-    monkeypatch.setattr(datasources, "get_now_playing", lambda: FAKE_NOW)
     monkeypatch.setattr(datasources, "get_snow", lambda lat, lon: FAKE_SNOW)
     import quotes
     monkeypatch.setattr(quotes, "get_quote", lambda day=None, fits=None, vetoed=(): FAKE_QUOTE)
-    return {"weather": FAKE_WEATHER, "animal": fake_animal, "now": FAKE_NOW,
+    return {"weather": FAKE_WEATHER, "animal": fake_animal,
             "snow": FAKE_SNOW, "quote": FAKE_QUOTE}

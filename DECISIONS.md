@@ -180,6 +180,61 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 21. Rotation on the server, portrait layouts, quote off (2026-10-13)
+**Rotation is a config value, not a firmware one.** The panel can hang
+vertically (`rotation` = its clockwise turn from landscape: 0/90/180/270).
+The screen is drawn upright at the swapped size (1200×1600), the three pane
+previews stay upright, and only the device frame (`render/frame.png`) is
+turned back to native 1600×1200 before it is saved. The device protocol is
+untouched and the firmware never learns about orientation — which matters
+because the sketch is unverified on hardware and every contract change is a
+reflash. The frame is what gets hashed, so turning the panel bumps the
+version and forces the redraw it needs. PIL's `rotate()` is anticlockwise;
+turning the upright image by the panel's clockwise angle is the inverse the
+frame needs (a `(0,0)` mark lands bottom-left in the frame for 90°, which is
+where the native top-left corner goes when the panel turns clockwise).
+
+**Two portrait arrangements, picked in the pane** (`portrait_layout`), so
+they can be compared on the wall rather than argued about from mockups:
+- *hero* (default — Matt picked it, and portrait is now the primary hanging,
+  so `rotation` defaults to 90): the bottom third is the weather band
+  (weather left; now-playing and the snow report right), the top two thirds
+  are the art section. The plate is centred there on its **ink centroid**,
+  not its bounding box (a heron is a big body under a thin neck; the eye
+  centres the body), clamped inside the section. The long edge fades go: a
+  36 px softening only. The caption sits top-right, on the art. Below, a
+  **symmetric band** (the landscape weather block, left-aligned, read as
+  cramped under a centred image): the temperature row centred; under it two
+  grouped blocks hugging ±360 px of centre — the next two days on the left,
+  sunrise over sunset on the right. The snow report is one centred row along
+  the bottom border, its label with clear air above the glyphs. With snow
+  off the band drops to the border and the art section grows by ~150 px.
+  Anything laid over the art — caption, weather — is measured first and the
+  art lightened under it with a feathered white patch (`_fade_behind`): fade
+  the image for the text, not the whole edge.
+
+**Now-playing is gone** (fetcher, config flag, fast render TTL, pane
+checkbox). Matt will never use it on the wall; §18 stays as history.
+- *stack*: the landscape arrangement folded — weather top-left, caption
+  top-right, engraving across the lower two thirds, snow bottom-left over the
+  art's faded edge. Kept as the alternative.
+
+One portrait-specific rule: in a 1200 px-wide frame the weather's first row
+(glyph · 21° · HIGH 28°) reaches x≈920, so the caption cannot share that row
+as it does in landscape. It tucks under the HIGH temperature instead
+(`PORTRAIT_CAPTION_TOP`). The first mockups had it colliding with the HIGH.
+
+**Quote off by default, not removed** (`show_quote`). Matt wanted the clutter
+gone; the fetcher, the no-repeat history, vetoes and the pane card stay so it
+can come back with one checkbox. With it off the art box in landscape grows
+from (560,150)–(1600,1150) to (440,140)–(1600,1200): a tall plate gains ~6%
+height, a wide one ~11% width, and the engraving now runs to the bottom
+border. The quote is not fetched while hidden, so Wikiquote sees no traffic.
+
+Layout previews live in `docs/layouts/` — rendered with *synthetic* plates
+(a hatched heron and crocodile drawn in code) because Commons was blocked
+from the sandbox they were made in; they show placement, not real art.
+
 ## 20g. Standardising wildly different plates (tenth pass)
 Plates arrive at 6× the spread in subject aspect ratio (0.26 for a seahorse,
 1.53 for a crocodile), some are isolated figures on blank paper, some are

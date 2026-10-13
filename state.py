@@ -20,11 +20,21 @@ log = logging.getLogger("inkplate.state")
 
 _lock = threading.Lock()
 
+ROTATIONS = (0, 90, 180, 270)
+
 DEFAULT_CONFIG = {
     # How long the device deep-sleeps between refreshes.
     "refresh_minutes": config.DEFAULT_REFRESH_MINUTES,
     # Which screen renderer produces the frame (key into screens.SCREENS).
     "screen": screens.DEFAULT_SCREEN,
+    # How the panel is hung: degrees it is turned clockwise from its native
+    # landscape. 90/270 render the screen portrait (1200x1600) and the
+    # renderer turns the frame back, so the device always receives 1600x1200
+    # and the firmware never knows. Portrait is the primary hanging, so 90
+    # is the default; if it comes out upside down on the wall, use 270.
+    "rotation": 90,
+    # Which portrait arrangement to use when rotated (screens.PORTRAIT_LAYOUTS).
+    "portrait_layout": screens.DEFAULT_PORTRAIT_LAYOUT,
     # Tethered mode: device skips deep sleep and polls fast. For bring-up.
     "tethered": False,
     "tethered_poll_seconds": config.DEFAULT_TETHERED_POLL_SECONDS,
@@ -32,9 +42,6 @@ DEFAULT_CONFIG = {
     "latitude": config.DEFAULT_LATITUDE,
     "longitude": config.DEFAULT_LONGITUDE,
     "location_name": config.DEFAULT_LOCATION_NAME,
-    # Now-playing widget (rage.bix). Off by default: at battery cadences the
-    # song is stale anyway; enable on mains power with a short cadence.
-    "show_now_playing": False,
     # Snow report (seasonal): its own location, independent of the weather's.
     "show_snow": True,
     "snow_latitude": config.DEFAULT_SNOW_LATITUDE,
@@ -50,6 +57,10 @@ DEFAULT_CONFIG = {
     # Commons file titles of animal images vetoed from the pane — never
     # picked again (the animal itself stays in rotation, via another plate).
     "vetoed_images": [],
+    # Draw the daily quote along the bottom border. Off: the fetcher, vetoes
+    # and pane card stay, the panel just doesn't show it and the engraving
+    # takes the room.
+    "show_quote": False,
     # Quote texts vetoed from the pane — never shown again (matched by
     # quotes.key, so punctuation/case differences don't matter).
     "vetoed_quotes": [],
@@ -84,6 +95,10 @@ def load_config() -> dict:
     if cfg["screen"] not in screens.SCREENS:
         log.warning("configured screen %r no longer exists, falling back", cfg["screen"])
         cfg["screen"] = screens.DEFAULT_SCREEN
+    if cfg["rotation"] not in ROTATIONS:
+        cfg["rotation"] = 0
+    if cfg["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
+        cfg["portrait_layout"] = screens.DEFAULT_PORTRAIT_LAYOUT
     return cfg
 
 
@@ -102,6 +117,17 @@ def update_config(**changes) -> dict:
         if changes["screen"] not in screens.SCREENS:
             raise ValueError(f"unknown screen: {changes['screen']}")
         cfg["screen"] = changes["screen"]
+    if "rotation" in changes:
+        v = int(changes["rotation"])
+        if v not in ROTATIONS:
+            raise ValueError("rotation must be 0, 90, 180 or 270")
+        cfg["rotation"] = v
+    if "portrait_layout" in changes:
+        if changes["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
+            raise ValueError(f"unknown portrait layout: {changes['portrait_layout']}")
+        cfg["portrait_layout"] = changes["portrait_layout"]
+    if "show_quote" in changes:
+        cfg["show_quote"] = bool(changes["show_quote"])
     if "tethered" in changes:
         cfg["tethered"] = bool(changes["tethered"])
     if "tethered_poll_seconds" in changes:
@@ -133,8 +159,6 @@ def update_config(**changes) -> dict:
     if "show_snow" in changes:
         cfg["show_snow"] = bool(changes["show_snow"])
 
-    if "show_now_playing" in changes:
-        cfg["show_now_playing"] = bool(changes["show_now_playing"])
     if "animal_offset" in changes:
         cfg["animal_offset"] = int(changes["animal_offset"])
     if "animal_period_days" in changes:
