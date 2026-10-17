@@ -180,6 +180,26 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 23. Only repeated fetch failures are reported (2026-10-16)
+
+Open-Meteo 503'd once on 2026-10-15 and was fine on the next fetch, but each
+blip logged a WARNING plus an error event and showed up as six error groups in
+the nightly log review. `_cached_fetch` now keeps the run of consecutive
+failures in the cache entry (so it survives restarts). A failure that still has
+a cached copy to serve is logged at INFO, worded so the log compiler doesn't
+flag it. The WARNING and pane event come at `REPEATED_FAILURES` (3) in a row, or
+straight away when nothing is cached. A recovery after a reported run is logged
+as an event.
+
+## 22. Quote removed (2026-10-16)
+
+The quote had been off by default since §21; Matt asked for it gone. `quotes.py`,
+its tests, the `show_quote`/`vetoed_quotes` config keys (dropped on load from
+an older `config.json`), the pane's quote card, *Next quote* and *Veto quote*,
+and the `quote` targets of `/api/cycle` and `/api/veto` (now 400) are all
+removed. The landscape art box keeps the quote-off geometry. §20g and §21
+describe the feature as it was.
+
 ## 21. Rotation on the server, portrait layouts, quote off (2026-10-13)
 **Rotation is a config value, not a firmware one.** The panel can hang
 vertically (`rotation` = its clockwise turn from landscape: 0/90/180/270).

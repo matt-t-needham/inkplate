@@ -64,6 +64,49 @@ def test_weather_stale_on_error(data_dir, no_network, monkeypatch):
     assert datasources.get_weather(45.52, -122.68) == good
 
 
+def test_one_off_failure_is_quiet_repeated_ones_are_reported(data_dir, no_network,
+                                                              monkeypatch, caplog):
+    import logging
+    import state
+    good = {"ok": True}
+    name = "weather_45.520_-122.680.json"
+    datasources._cache_write(name, {"fetched_at": time.time() - 99999, "data": good})
+
+    def down(*a, **k):
+        raise RuntimeError("503 from upstream")
+    monkeypatch.setattr(datasources, "_get_json", down)
+    caplog.set_level(logging.INFO, logger="inkplate.datasources")
+
+    def warnings():
+        return [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    for n in range(1, datasources.REPEATED_FAILURES):
+        assert datasources.get_weather(45.52, -122.68) == good
+        assert warnings() == [], f"failure {n} of a run should not warn"
+        assert datasources._cache_read(name)["failures"] == n
+    assert not [e for e in state.read_events() if e["kind"] == "error"]
+    # bix-infra's log compiler flags any line matching its DEFAULT_FLAG; a blip
+    # must not.
+    import re
+    flag = re.compile(r'\b(error|errors?:|warn(ing)?|fail(ed|ure)?|exception|crash(ed)?'
+                      r'|fatal|panic|traceback|critical)\b', re.I)
+    assert not any(flag.search(r.getMessage()) for r in caplog.records), \
+        "a blip must not read as a failure to the log review"
+
+    assert datasources.get_weather(45.52, -122.68) == good   # the run reaches the limit
+    assert len(warnings()) == 1 and "in a row" in warnings()[0].getMessage()
+    assert [e["kind"] for e in state.read_events()] == ["error"]
+
+
+def test_failure_count_resets_on_success(data_dir, no_network, monkeypatch):
+    name = "weather_45.520_-122.680.json"
+    datasources._cache_write(name, {"fetched_at": time.time() - 99999, "data": {"old": 1},
+                                    "failures": datasources.REPEATED_FAILURES})
+    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: OPEN_METEO_RAW)
+    datasources.get_weather(45.52, -122.68)
+    assert "failures" not in datasources._cache_read(name)
+
+
 def test_weather_none_when_never_fetched(data_dir, no_network, monkeypatch):
     def fail(*a, **k):
         raise RuntimeError("api down")

@@ -109,7 +109,6 @@
     border-radius:7px; padding:5px 12px; font:inherit; cursor:pointer;
   }
   button.danger:disabled, button.ghost:disabled { opacity:.5; cursor:default; }
-  .now-row .v.quote { font-weight:400; font-style:italic; font-family:Georgia, serif; }
   .msg { font-size:12px; } .msg.ok { color:var(--green); } .msg.err { color:var(--red); }
 
   /* Event log */
@@ -139,7 +138,6 @@
         </div>
         <button class="primary" id="btn-render">Render now → push</button>
         <button class="ghost" id="btn-cycle-animal">Next animal</button>
-        <button class="ghost" id="btn-cycle-quote">Next quote</button>
         <span class="push-note">push bumps the version; the device redraws at its next wake</span>
       </div>
       <div class="meta-line" id="render-meta">no render yet</div>
@@ -160,7 +158,7 @@
   <div class="col">
     <div class="card">
       <h2>Now showing</h2>
-      <div class="now-row">
+      <div class="now-row" style="margin-bottom:0">
         <div class="k">Animal</div>
         <div class="v" id="now-animal">—</div>
         <div class="sub" id="now-animal-sub"></div>
@@ -168,12 +166,6 @@
           <button class="ghost" id="btn-rotate-animal" title="Turn the plate a quarter clockwise — for a scan bound in sideways. Remembered for this image.">Rotate ↻</button>
           <button class="danger" id="btn-veto-animal">Veto image</button>
         </div>
-      </div>
-      <div class="now-row" style="margin-bottom:0">
-        <div class="k">Quote <span id="now-q-date"></span></div>
-        <div class="v quote" id="now-q">—</div>
-        <div class="sub" id="now-q-attr"></div>
-        <div class="btn-row"><button class="danger" id="btn-veto-q">Veto quote</button></div>
       </div>
     </div>
 
@@ -195,7 +187,6 @@
       <div class="field"><label for="f-location">Weather location</label><input id="f-location" type="text" maxlength="60" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:6px 8px;font:inherit"></div>
       <div class="field"><label for="f-lat">Latitude</label><input id="f-lat" type="number" step="0.0001" min="-90" max="90"></div>
       <div class="field"><label for="f-lon">Longitude</label><input id="f-lon" type="number" step="0.0001" min="-180" max="180"></div>
-      <div class="field"><label for="f-quote" title="Draws Wikiquote's quote of the day along the bottom border. Off, the engraving takes the room; the quote card below keeps working either way.">Quote on panel</label><input id="f-quote" type="checkbox"></div>
       <div class="field" style="margin-top:16px"><label for="f-snow" title="Seasonal: turn off when the lifts close — the line disappears and nothing is fetched.">Snow report</label><input id="f-snow" type="checkbox"></div>
       <div class="field"><label for="f-snow-name">Snow location</label><input id="f-snow-name" type="text" maxlength="60" style="width:140px;background:var(--bg);color:var(--text);border:1px solid var(--surface1);border-radius:6px;padding:6px 8px;font:inherit"></div>
       <div class="field"><label for="f-snow-lat">Snow latitude</label><input id="f-snow-lat" type="number" step="0.0001" min="-90" max="90"></div>
@@ -278,7 +269,6 @@ async function cycle(what, btn) {
   }
 }
 $('btn-cycle-animal').addEventListener('click', e => cycle('animal', e.target));
-$('btn-cycle-quote').addEventListener('click', e => cycle('quote', e.target));
 
 $('btn-save').addEventListener('click', async () => {
   const msg = $('save-msg');
@@ -290,7 +280,6 @@ $('btn-save').addEventListener('click', async () => {
         screen: $('f-screen').value,
         rotation: parseInt($('f-rotation').value, 10),
         portrait_layout: $('f-portrait-layout').value,
-        show_quote: $('f-quote').checked,
         refresh_minutes: parseInt($('f-refresh').value, 10),
         tethered: $('f-tethered').checked,
         tethered_poll_seconds: parseInt($('f-poll').value, 10),
@@ -335,17 +324,10 @@ function renderNow(cur) {
     a.rotation ? 'turned ' + a.rotation + '°' : null].filter(Boolean).join(' · ') : '';
   $('btn-veto-animal').disabled = !(a && a.file);
   $('btn-rotate-animal').disabled = !(a && a.file);
-  const q = cur.quote;
-  $('now-q').textContent = q ? '“' + q.text + '”' : 'none chosen yet';
-  $('now-q-attr').textContent = q ? '— ' + [q.author, q.work].filter(Boolean).join(', ') + ' (' + q.year + ')' : '';
-  $('now-q-date').textContent = (q && q.qotd_date ? '· Wikiquote QOTD ' + q.qotd_date : '') +
-    (stateCache && !stateCache.config.show_quote ? ' · not drawn on the panel' : '');
-  $('btn-veto-q').disabled = !q;
 }
 
 async function veto(what, btn) {
-  const noun = what === 'animal' ? 'image' : what;
-  if (!confirm(`Veto this ${noun}? It's removed from rotation for good.`)) return;
+  if (!confirm(`Veto this image? It's removed from rotation for good.`)) return;
   btn.disabled = true;
   try {
     await api('POST', 'api/veto', {what});
@@ -362,7 +344,6 @@ async function rotateAnimal(btn) {
   finally { btn.disabled = false; await loadState(); refreshPreviewImg(); }
 }
 $('btn-rotate-animal').addEventListener('click', e => rotateAnimal(e.target));
-$('btn-veto-q').addEventListener('click', e => veto('quote', e.target));
 
 function renderDeviceBadge(st) {
   const dot = $('dev-dot'), label = $('dev-status');
@@ -403,7 +384,6 @@ function renderState(st) {
   }
   if (focused !== 'f-portrait-layout') pl.value = st.config.portrait_layout;
   if (focused !== 'f-rotation') $('f-rotation').value = st.config.rotation;
-  $('f-quote').checked = st.config.show_quote;
   if (focused !== 'f-refresh') $('f-refresh').value = st.config.refresh_minutes;
   $('f-tethered').checked = st.config.tethered;
   if (focused !== 'f-poll') $('f-poll').value = st.config.tethered_poll_seconds;

@@ -17,11 +17,6 @@ def test_dashboard_portrait_layouts(data_dir, fake_data):
         state.update_config(portrait_layout=layout, show_snow=True)
         img = screens.dashboard(1200, 1600)
         assert img.size == (1200, 1600), layout
-    # Every layout also has a quote slot when the quote is switched back on.
-    state.update_config(show_quote=True)
-    for layout in screens.PORTRAIT_LAYOUTS:
-        state.update_config(portrait_layout=layout)
-        assert screens.dashboard(1200, 1600).size == (1200, 1600), layout
     assert screens.dashboard(1600, 1200).size == (1600, 1200)
 
 
@@ -43,40 +38,6 @@ def test_hero_centres_the_plate_in_the_top_section(data_dir, fake_data):
     assert max(xs) < 1180 and min(xs) > 20     # whole figure inside the frame
 
 
-def test_quote_off_by_default_and_not_fetched(data_dir, fake_data, monkeypatch):
-    import quotes
-    import state
-    calls = []
-    monkeypatch.setattr(quotes, "get_quote",
-                        lambda day=None, fits=None, vetoed=(): calls.append(1) or fake_data["quote"])
-    assert state.load_config()["show_quote"] is False
-    screens.dashboard(400, 300)
-    assert calls == []          # hidden means not even fetched
-    state.update_config(show_quote=True)
-    screens.dashboard(400, 300)
-    assert calls == [1]
-
-
-def test_quote_off_gives_the_engraving_more_room(data_dir, fake_data):
-    """With the quote hidden the art box reaches the bottom border: a tall
-    plate that would stop short of the quote now runs down to the fade."""
-    import state
-    from PIL import Image
-    tall = fake_data["animal"]["path"]
-    Image.new("RGB", (300, 1200), (30, 30, 30)).save(tall)   # solid dark plate
-    state.update_config(show_quote=False)
-    off = screens.dashboard(1600, 1200)
-    state.update_config(show_quote=True)
-    on = screens.dashboard(1600, 1200)
-
-    def lowest_ink(img):
-        for y in range(img.height - 1, 0, -1):
-            if any(img.getpixel((x, y))[0] < 128 for x in range(1200, 1600, 8)):
-                return y
-        return 0
-    assert lowest_ink(off) > lowest_ink(on)
-
-
 def test_default_screen_registered():
     assert screens.DEFAULT_SCREEN in screens.SCREENS
     assert screens.DEFAULT_SCREEN == "dashboard"
@@ -92,8 +53,6 @@ def test_dashboard_survives_every_source_down(data_dir, monkeypatch):
     monkeypatch.setattr(datasources, "get_weather", lambda lat, lon: None)
     monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): None)
     monkeypatch.setattr(datasources, "get_snow", lambda lat, lon: None)
-    import quotes
-    monkeypatch.setattr(quotes, "get_quote", lambda day=None, fits=None, vetoed=(): None)
     img = screens.dashboard(1600, 1200)
     assert img.size == (1600, 1200)  # degraded, never blank/crashed
 
@@ -227,14 +186,6 @@ def test_dashboard_snow_toggle_and_location(data_dir, fake_data, monkeypatch):
 def test_dow():
     assert screens._dow("2026-12-16") == "Wed"
     assert screens._dow(None) == "?"
-
-
-def test_quote_fits_and_attribution():
-    assert screens.quote_fits("Short and sweet.")
-    assert not screens.quote_fits("word " * 120)
-    q = {"author": "Mark Twain", "work": "Following the Equator", "year": "1897"}
-    assert screens.quote_attribution(q) == "— Mark Twain, Following the Equator (1897)"
-    assert screens.quote_attribution(q, with_work=False) == "— Mark Twain (1897)"
 
 
 def _figure_plate(w=900, h=1200):

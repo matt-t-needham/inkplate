@@ -8,7 +8,7 @@ finished frame back to the panel's native orientation itself).
 
 Screens:
 - dashboard       — the real thing: weather, daily 1800s animal engraving,
-                    seasonal snow report, optional daily quote; its own
+                    seasonal snow report; its own
                     portrait layout when taller than wide
 - placeholder     — proves the whole pipeline end to end
 - palette_test    — six solid color bands; verifies color mapping on the panel
@@ -22,7 +22,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 import config
 import datasources
-import quotes
 from palette import SPECTRA_COLORS
 
 BLACK = (0, 0, 0)
@@ -424,20 +423,14 @@ def _dashboard_data(cfg: dict) -> dict:
             cfg.get("image_rotations") or {}),
         "snow": (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
                  if cfg["show_snow"] else None),
-        # Off by default: the quote is kept (fetcher, vetoes, pane card) but
-        # not drawn, so the engraving gets the room instead.
-        "quote": (quotes.get_quote(date.today(), fits=quote_fits,
-                                   vetoed=cfg["vetoed_quotes"])
-                  if cfg.get("show_quote") else None),
     }
 
 
 def dashboard(width: int, height: int) -> Image.Image:
     """Minimal dashboard. The daily engraving is a soft, edge-faded background
     bleeding off the right border; weather sits top-left; source caption
-    top-right; the snow report (seasonal) and the quote (off by default) along
-    the bottom. Display type is Michroma (the rage channel font), the caption
-    and quote are serif italic. Every widget degrades independently — a dead
+    top-right; the snow report (seasonal) along the bottom. Display type is
+    Michroma (the rage channel font), the caption is serif italic. Every widget degrades independently — a dead
     API never blanks the panel. Taller than wide means the panel is hung
     vertically and the portrait layout is used."""
     # Lazy import: state imports screens (for DEFAULT_SCREEN), so importing
@@ -463,12 +456,9 @@ def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict) -> Imag
 
     # Fixed art box in panel coordinates (see _draw_art). The caption clears
     # the top; the weather only occupies the upper left, so the box reaches
-    # under it — a wide plate's left edge is inside the fade by then. With the
-    # quote off the box runs to the bottom border and further left.
-    if data["quote"]:
-        box = (X(560), Y(150), width, Y(1150))
-    else:
-        box = (X(440), Y(140), width, height)
+    # under it — a wide plate's left edge is inside the fade by then — and
+    # runs to the bottom border.
+    box = (X(440), Y(140), width, height)
     drew_art = _draw_art(img, data["animal"], box, X, Y)
 
     d = ImageDraw.Draw(img)
@@ -477,8 +467,6 @@ def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict) -> Imag
     _draw_weather(d, data["weather"], X(52), Y(44), X, Y, halo)
 
     bottom = height - Y(52)
-    if data["quote"]:
-        bottom = _draw_quote(d, data["quote"], X(52), bottom, X, Y, halo) - Y(40)
     if data["snow"]:
         _snow_report(d, X(52), bottom, data["snow"], X, Y, halo,
                      name=cfg["snow_location_name"])
@@ -498,9 +486,6 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
         # Build upwards from the bottom border: snow row (optional), weather
         # band, then the art takes whatever is left above.
         bottom = height - Y(52)
-        if data["quote"]:
-            bottom = _draw_quote(ImageDraw.Draw(img), data["quote"], LX,
-                                 bottom, X, Y, halo) - Y(40)
         snow_top = bottom - Y(HERO_SNOW_H) if data["snow"] else bottom
         band_top = (snow_top - Y(28) if data["snow"] else bottom) - Y(HERO_WEATHER_H)
         m = X(HERO_MARGIN)
@@ -538,8 +523,6 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
     _draw_weather(d, data["weather"], LX, Y(44), X, Y, halo)
 
     bottom = height - Y(52)
-    if data["quote"]:
-        bottom = _draw_quote(d, data["quote"], LX, bottom, X, Y, halo) - Y(40)
     if data["snow"]:
         _snow_report(d, LX, bottom, data["snow"], X, Y, halo,
                      name=cfg["snow_location_name"])
@@ -860,50 +843,9 @@ def _snow_foot(d: ImageDraw.ImageDraw, cx: int, bottom: int, snow, X, Y, halo,
     return (cx - total // 2, top, cx + total // 2, bottom)
 
 
-def _draw_quote(d: ImageDraw.ImageDraw, quote: dict, LX: int, bottom: int,
-                X, Y, halo) -> int:
-    """Quote in serif italic with the attribution line beneath, its last
-    line ending at `bottom`. Returns the y of its top edge, so whatever
-    stacks above it (the snow report) can sit just clear."""
-    f_q = _font(Y(QUOTE_SIZE), style="serif_italic")
-    f_a = _font(Y(24))
-    qlines = _wrap(d, f"“{quote['text']}”", f_q, X(QUOTE_WIDTH))[:QUOTE_MAX_LINES]
-    attr = quote_attribution(quote)
-    if d.textlength(attr, font=f_a) > X(QUOTE_WIDTH):
-        attr = quote_attribution(quote, with_work=False)
-    line_h = Y(54)
-    qtop = bottom - Y(36) - line_h * len(qlines)
-    qy = qtop
-    for ln in qlines:
-        d.text((LX, qy), ln, font=f_q, fill=BLACK, **halo)
-        qy += line_h
-    d.text((LX, qy + Y(6)), attr, font=f_a, fill=BLACK, **halo)
-    return qtop
-
-
-# ── dashboard helpers: quote, temperatures, snow report ──────────────────────
+# ── dashboard helpers: temperatures, snow report ─────────────────────────────
 
 CAPTION_WIDTH = 520   # top-right animal caption; wider collides with HIGH
-QUOTE_SIZE = 40        # serif italic, panel px
-QUOTE_WIDTH = 1060     # leaves the art its right-hand side
-QUOTE_MAX_LINES = 3    # longer quotes are skipped, not truncated
-
-
-def quote_fits(text: str) -> bool:
-    """Would `text` wrap to QUOTE_MAX_LINES or fewer at full panel size? Always
-    measured at 1600x1200 so the day's pick never depends on render size."""
-    d = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    f = _font(QUOTE_SIZE, style="serif_italic")
-    return len(_wrap(d, f"“{text}”", f, QUOTE_WIDTH)) <= QUOTE_MAX_LINES
-
-
-def quote_attribution(q: dict, with_work: bool = True) -> str:
-    """'— Mark Twain, Following the Equator (1897)'. Year is always present
-    (quotes.get_quote rejects undated quotes); the work is optional."""
-    who = q.get("author") or ""
-    if with_work and q.get("work"):
-        who += f", {q['work']}"
-    return f"— {who} ({q['year']})" if q.get("year") else f"— {who}"
 
 
 SNOW_FLAKE = 0xf076   # wi-snowflake-cold
