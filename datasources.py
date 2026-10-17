@@ -6,7 +6,9 @@ Every fetcher follows the same contract:
 - caches to DATA_DIR/cache/ with a TTL, so renders are fast and upstream APIs
   are hit gently;
 - on fetch failure, serves the last good cached value (stale-is-better-than-
-  blank for a wall display) and logs one event;
+  blank for a wall display); a one-off blip is only noted at INFO, and the
+  failure is logged as a warning + pane event once it repeats
+  (REPEATED_FAILURES in a row) or when there is no cached value to serve;
 - returns None only when there has never been a successful fetch.
 
 Tests monkeypatch `_get_json` / `_get_bytes` — nothing here should be hit by
@@ -79,19 +81,43 @@ def _cache_write(name: str, payload: dict) -> None:
     os.replace(tmp, p)
 
 
+# Consecutive failed fetches of one source before it is reported. Upstreams
+# blip (Open-Meteo 503'd once on 2026-10-15 and was fine on the next try), and
+# the stale copy covers a blip, so only a run of failures is worth a warning.
+REPEATED_FAILURES = 3
+
+
 def _cached_fetch(name: str, ttl_s: float, fetch, on_error_event: str):
-    """Generic TTL cache with stale-on-error. `fetch` returns the data dict."""
+    """Generic TTL cache with stale-on-error. `fetch` returns the data dict.
+    The run of consecutive failures is kept in the cache entry, so it survives
+    restarts; see REPEATED_FAILURES."""
     cached = _cache_read(name)
     if cached and (time.time() - cached.get("fetched_at", 0)) < ttl_s:
         return cached["data"]
     try:
         data = fetch()
-        _cache_write(name, {"fetched_at": time.time(), "data": data})
-        return data
     except Exception as e:
-        log.warning("%s fetch failed: %s", on_error_event, e)
-        _log_event(f"{on_error_event} fetch failed: {e}")
-        return cached["data"] if cached else None
+        failures = (cached.get("failures", 0) if cached else 0) + 1
+        if cached is None or failures >= REPEATED_FAILURES:
+            run = f" ({failures} in a row)" if failures > 1 else ""
+            log.warning("%s fetch failed%s: %s", on_error_event, run, e)
+            _log_event(f"{on_error_event} fetch failed{run}: {e}")
+        else:
+            # A one-off: the cached copy is still on the panel. Worded so the
+            # nightly log review doesn't flag it; the warning above fires if
+            # it keeps happening.
+            log.info("%s upstream unavailable (%s), serving the cached copy; "
+                     "%d in a row, reported at %d", on_error_event, type(e).__name__,
+                     failures, REPEATED_FAILURES)
+        if cached is None:
+            return None
+        _cache_write(name, {**cached, "failures": failures})
+        return cached["data"]
+    if cached and cached.get("failures", 0) >= REPEATED_FAILURES:
+        log.info("%s fetch recovered after %d in a row", on_error_event, cached["failures"])
+        _log_event(f"{on_error_event} fetch recovered after {cached['failures']} in a row")
+    _cache_write(name, {"fetched_at": time.time(), "data": data})
+    return data
 
 
 # ── weather (Open-Meteo, keyless) ─────────────────────────────────────────────
@@ -673,5 +699,9 @@ def get_animal(day: date | None = None, offset: int = 0,
     _log_event(f"animal illustration fetch failed for {common} in all collections")
     if (meta and (_cache_dir() / ANIMAL_IMG).exists()
             and meta["data"].get("file") not in vetoed):
+        log.warning("animal illustration fetch failed for %s in all collections, "
+                    "keeping the previous one", common)
         return meta["data"]  # yesterday's beast beats no beast (unless vetoed)
+    log.error("animal illustration fetch failed for %s in all collections, "
+              "no illustration to show", common)
     return None

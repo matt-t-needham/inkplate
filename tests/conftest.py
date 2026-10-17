@@ -43,11 +43,6 @@ FAKE_SNOW = {"depth_cm": 152.4, "recent_cm": 38.2, "days": [
     {"date": "2026-09-19", "snow_cm": 18.1, "code": 75},
 ]}
 
-FAKE_QUOTE = {"text": "The reports of my death are greatly exaggerated.",
-              "author": "Mark Twain", "work": "New York Journal", "year": "1897",
-              "qotd_date": "2015-06-02", "key": "thereportsofmydeath"}
-
-
 @pytest.fixture()
 def fake_data(tmp_path, monkeypatch):
     """Stub every external fetcher so screens/API tests stay offline.
@@ -67,7 +62,4 @@ def fake_data(tmp_path, monkeypatch):
     monkeypatch.setattr(datasources, "get_weather", lambda lat, lon: FAKE_WEATHER)
     monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): fake_animal)
     monkeypatch.setattr(datasources, "get_snow", lambda lat, lon: FAKE_SNOW)
-    import quotes
-    monkeypatch.setattr(quotes, "get_quote", lambda day=None, fits=None, vetoed=(): FAKE_QUOTE)
-    return {"weather": FAKE_WEATHER, "animal": fake_animal,
-            "snow": FAKE_SNOW, "quote": FAKE_QUOTE}
+    return {"weather": FAKE_WEATHER, "animal": fake_animal, "snow": FAKE_SNOW}

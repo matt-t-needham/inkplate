@@ -60,13 +60,6 @@ DEFAULT_CONFIG = {
     # Per-image rotation (clockwise degrees, keyed by Commons file title)
     # for plates scanned sideways. Only non-zero entries are kept.
     "image_rotations": {},
-    # Draw the daily quote along the bottom border. Off: the fetcher, vetoes
-    # and pane card stay, the panel just doesn't show it and the engraving
-    # takes the room.
-    "show_quote": False,
-    # Quote texts vetoed from the pane — never shown again (matched by
-    # quotes.key, so punctuation/case differences don't matter).
-    "vetoed_quotes": [],
     # Monotonic content version. The device compares this against the version
     # it stored in RTC memory to decide whether to redraw (a redraw costs ~20s
     # and visible flashing, so unchanged content must never trigger one).
@@ -131,8 +124,6 @@ def update_config(**changes) -> dict:
         if changes["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
             raise ValueError(f"unknown portrait layout: {changes['portrait_layout']}")
         cfg["portrait_layout"] = changes["portrait_layout"]
-    if "show_quote" in changes:
-        cfg["show_quote"] = bool(changes["show_quote"])
     if "tethered" in changes:
         cfg["tethered"] = bool(changes["tethered"])
     if "tethered_poll_seconds" in changes:
@@ -185,11 +176,6 @@ def update_config(**changes) -> dict:
             if deg:
                 rots[str(k)] = deg
         cfg["image_rotations"] = rots
-    if "vetoed_quotes" in changes:
-        v = changes["vetoed_quotes"]
-        if not isinstance(v, list):
-            raise TypeError("vetoed_quotes must be a list")
-        cfg["vetoed_quotes"] = list(dict.fromkeys(str(t)[:400] for t in v))
     save_config(cfg)
     return cfg
 
@@ -232,10 +218,17 @@ def _read_ndjson(path: Path, limit: int) -> list[dict]:
     return out
 
 
+PROBLEM_EVENT_KINDS = {"error", "device_error"}
+
+
 def log_event(kind: str, message: str, **extra) -> None:
     """Server-side event trail (renders, config changes, device errors) —
-    shown in the control pane so debugging doesn't require shell access."""
-    log.info("event %s: %s", kind, message)
+    shown in the control pane so debugging doesn't require shell access.
+    Problem kinds aren't echoed to the log: their callers log them at
+    WARNING/ERROR with the detail, and an INFO echo would put a failure in
+    app.log under the wrong level."""
+    if kind not in PROBLEM_EVENT_KINDS:
+        log.info("event %s: %s", kind, message)
     _append_ndjson(config.DATA_DIR / "events.ndjson", {"kind": kind, "message": message, **extra},
                    config.MAX_EVENT_LINES)
 

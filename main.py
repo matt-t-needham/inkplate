@@ -13,6 +13,7 @@ import asyncio
 import logging
 import logging.handlers
 import os
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -22,6 +23,9 @@ import config
 
 # Logging before local imports, per house convention.
 _fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
+# Log stamps are UTC whatever TZ the container sets (TZ is for what the panel
+# displays); the nightly log compiler windows app.log by these stamps.
+logging.Formatter.converter = time.gmtime
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(), format=_fmt)
 log = logging.getLogger("inkplate")
 try:
@@ -35,7 +39,6 @@ except OSError as e:
     log.warning("file logging unavailable: %s", e)
 
 import datasources  # noqa: E402
-import quotes  # noqa: E402
 import renderer  # noqa: E402
 import screens  # noqa: E402
 import state  # noqa: E402
@@ -88,17 +91,14 @@ async def api_state():
 
 def _current(cfg: dict | None = None) -> dict:
     """What the dashboard is showing right now — for the pane's veto card.
-    Both come from caches (no network on the 10 s poll)."""
+    From the cache (no network on the 10 s poll)."""
     cfg = cfg or state.load_config()
     a = datasources.cached_animal()
-    q = quotes.cached_quote()
     return {
         "animal": ({k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
                                            "collection", "file")}
                    | {"rotation": (cfg.get("image_rotations") or {}).get(a.get("file"), 0)}
                    if a else None),
-        "quote": {k: q.get(k) for k in ("text", "author", "work", "year",
-                                         "qotd_date")} if q else None,
     }
 
 
@@ -117,7 +117,7 @@ async def api_config(request: Request):
     allowed = {"refresh_minutes", "screen", "rotation", "portrait_layout",
                "tethered", "tethered_poll_seconds",
                "latitude", "longitude", "location_name",
-               "show_quote", "animal_period_days",
+               "animal_period_days",
                "show_snow", "snow_latitude", "snow_longitude", "snow_location_name"}
     changes = {k: v for k, v in body.items() if k in allowed}
     if not changes:
@@ -146,9 +146,8 @@ async def api_render():
 @app.post("/api/cycle")
 async def api_cycle(request: Request):
     """Next animal: advance the daily animal sequence by one (persisted, so
-    device and preview stay in sync). Next quote: replace today's quote with
-    another one (the current one is in the shown-history, so it won't
-    return). Re-renders immediately; the version bumps via the content hash."""
+    device and preview stay in sync). Re-renders immediately; the version
+    bumps via the content hash."""
     body = await request.json()
     what = body.get("what")
     cfg = state.load_config()
@@ -157,17 +156,8 @@ async def api_cycle(request: Request):
                                       animal_offset=cfg["animal_offset"] + 1)
         state.log_event("config", f"cycled animal (offset {cfg['animal_offset']})")
         m = await _rerender("cycle")
-    elif what == "quote":
-        before = quotes.cached_quote()
-        await asyncio.to_thread(quotes.request_next)
-        m = await _rerender("cycle")
-        after = quotes.cached_quote()
-        if not after or (before and after.get("key") == before.get("key")):
-            raise HTTPException(502, "no other usable quote found right now — "
-                                     "still showing the current one")
-        state.log_event("config", f"next quote: {after['text']} — {after.get('author')}")
     else:
-        raise HTTPException(400, "what must be animal|quote")
+        raise HTTPException(400, "what must be animal")
     return {"config": cfg, "render": m, "current": _current()}
 
 
@@ -175,8 +165,7 @@ async def api_cycle(request: Request):
 async def api_veto(request: Request):
     """Ban what's on screen, permanently. Animal: the image's Commons file
     joins vetoed_images and is never picked again — the animal stays in
-    rotation and is redrawn from another plate. Quote: its text joins
-    vetoed_quotes and is never picked again. The panel re-renders with a
+    rotation and is redrawn from another plate. The panel re-renders with a
     replacement immediately; 502 if none could be found."""
     body = await request.json()
     what = body.get("what")
@@ -193,21 +182,8 @@ async def api_veto(request: Request):
         if not new or new.get("file") == a["file"]:
             raise HTTPException(502, "image vetoed, but no replacement plate was "
                                      "found — the panel shows no animal")
-    elif what == "quote":
-        q = quotes.cached_quote()
-        if not q or not q.get("text"):
-            raise HTTPException(409, "no quote is currently showing")
-        await asyncio.to_thread(state.update_config,
-                                vetoed_quotes=cfg["vetoed_quotes"] + [q["text"]])
-        state.log_event("config", f"vetoed quote: {q['text']} — {q.get('author')}")
-        await asyncio.to_thread(quotes.request_next)
-        m = await _rerender("veto")
-        new = quotes.cached_quote()
-        if not new or new.get("key") == q.get("key"):
-            raise HTTPException(502, "quote vetoed, but no replacement was found — "
-                                     "the panel shows no quote")
     else:
-        raise HTTPException(400, "what must be animal|quote")
+        raise HTTPException(400, "what must be animal")
     return {"render": m, "current": _current()}
 
 
@@ -309,6 +285,7 @@ async def api_checkin(request: Request):
                for k, v in list(payload.items())[:32]}
     await asyncio.to_thread(state.log_checkin, payload)
     if payload.get("error"):
+        log.warning("device reported an error: %s", payload["error"])
         state.log_event("device_error", f"device reported: {payload['error']}", **payload)
     cfg = state.load_config()
     return _device_meta(cfg, renderer.meta())

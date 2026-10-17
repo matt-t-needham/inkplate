@@ -46,12 +46,11 @@ def test_config_update_and_validation(client):
     assert client.post("/api/config", json={"latitude": 91}).status_code == 400
     assert client.post("/api/config", json={"longitude": -200}).status_code == 400
     r = client.post("/api/config", json={"latitude": 51.5, "longitude": -0.12,
-                                         "location_name": "London", "show_quote": True})
+                                         "location_name": "London"})
     assert r.status_code == 200
     cfg = r.json()
     assert (cfg["latitude"], cfg["longitude"]) == (51.5, -0.12)
     assert cfg["location_name"] == "London"
-    assert cfg["show_quote"] is True
     r = client.post("/api/config", json={"show_snow": False,
                                          "snow_location_name": "Timberline"})
     assert r.status_code == 200 and r.json()["show_snow"] is False
@@ -61,11 +60,10 @@ def test_config_update_and_validation(client):
 def test_rotation_config_and_portrait_frame(client):
     assert client.post("/api/config", json={"rotation": 45}).status_code == 400
     assert client.post("/api/config", json={"portrait_layout": "sideways"}).status_code == 400
-    r = client.post("/api/config", json={"rotation": 90, "portrait_layout": "hero",
-                                         "show_quote": True})
+    r = client.post("/api/config", json={"rotation": 90, "portrait_layout": "hero"})
     assert r.status_code == 200
     cfg = r.json()
-    assert (cfg["rotation"], cfg["portrait_layout"], cfg["show_quote"]) == (90, "hero", True)
+    assert (cfg["rotation"], cfg["portrait_layout"]) == (90, "hero")
 
     # The device frame is always the panel's native 1600x1200, whatever the
     # hanging; the previews are upright (portrait) so the pane shows the wall.
@@ -132,10 +130,22 @@ def test_checkin_flow(client):
     assert st["battery_percent"] == 71
 
 
-def test_checkin_error_creates_event(client):
+def test_checkin_error_creates_event(client, caplog):
+    import logging
+    caplog.set_level(logging.INFO)
     client.post("/api/device/checkin", json={"boot_count": 1, "error": "wifi timeout"})
     events = client.get("/api/events").json()
     assert any(e["kind"] == "device_error" and "wifi timeout" in e["message"] for e in events)
+    # Log standard: a problem is logged at WARNING or above, never echoed at INFO.
+    reported = [r for r in caplog.records if "wifi timeout" in r.getMessage()]
+    assert reported and all(r.levelno >= logging.WARNING for r in reported)
+
+
+def test_log_stamps_are_utc():
+    # Log standard: app.log stamps are UTC whatever the container's TZ.
+    import logging
+    import time
+    assert logging.Formatter.converter is time.gmtime
 
 
 def test_checkin_rejects_non_object(client):
@@ -163,35 +173,11 @@ def test_cycle_animal(client):
     assert r.status_code == 200
     assert r.json()["config"]["animal_offset"] == st0["config"]["animal_offset"] + 1
     assert client.post("/api/cycle", json={"what": "question"}).status_code == 400
-
-
-def _quote(text):
-    import quotes
-    return {"text": text, "author": "Someone", "work": None, "year": "1900",
-            "qotd_date": "2015-01-01", "key": quotes.key(text)}
-
-
-def test_cycle_quote(client, monkeypatch):
-    import datasources
-    import quotes
-    datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("Old.")})
-
-    def render_picks_new():   # stands in for the dashboard honouring request_next
-        datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("New.")})
-        return {"image_version": 1}
-    monkeypatch.setattr("renderer.render", lambda force=False: render_picks_new())
-    r = client.post("/api/cycle", json={"what": "quote"})
-    assert r.status_code == 200
-    assert r.json()["current"]["quote"]["text"] == "New."
-
-
-def test_cycle_quote_reports_no_replacement(client, monkeypatch):
-    import datasources
-    import quotes
-    datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("Old.")})
-    monkeypatch.setattr("renderer.render", lambda force=False: {"image_version": 1})
-    r = client.post("/api/cycle", json={"what": "quote"})
-    assert r.status_code == 502
+    # The quote feature is gone: its cycle/veto targets are unknown now.
+    assert client.post("/api/cycle", json={"what": "quote"}).status_code == 400
+    assert client.post("/api/veto", json={"what": "quote"}).status_code == 400
+    assert "quote" not in client.get("/api/state").json()["current"]
+    assert client.post("/api/config", json={"show_quote": True}).status_code == 400
 
 
 def test_veto_animal_image(client, monkeypatch):
@@ -239,19 +225,3 @@ def test_veto_animal_reports_no_replacement(client, monkeypatch):
     monkeypatch.setattr("renderer.render", lambda force=False: {"image_version": 1})
     assert client.post("/api/veto", json={"what": "animal"}).status_code == 502
     assert state.load_config()["vetoed_images"] == ["File:Vulpes a.tif"]  # still vetoed
-
-
-def test_veto_quote(client, monkeypatch):
-    import datasources
-    import quotes
-    assert client.post("/api/veto", json={"what": "quote"}).status_code == 409  # none chosen
-    datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("Be yourself.")})
-    cur = client.get("/api/state").json()["current"]["quote"]
-    assert cur["author"] == "Someone" and cur["year"] == "1900"
-
-    def render_picks_new():
-        datasources._cache_write(quotes.CURRENT, {"day": "2026-10-08", "data": _quote("New.")})
-        return {"image_version": 1}
-    monkeypatch.setattr("renderer.render", lambda force=False: render_picks_new())
-    assert client.post("/api/veto", json={"what": "quote"}).status_code == 200
-    assert state.load_config()["vetoed_quotes"] == ["Be yourself."]

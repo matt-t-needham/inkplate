@@ -13,7 +13,7 @@ arrived).
 
 ## The dashboard
 
-Three widgets (plus the optional quote), each failing independently (a dead API degrades one box, never
+Three widgets, each failing independently (a dead API degrades one box, never
 the panel):
 
 - **Weather** (Open-Meteo, keyless) — current temp in °C and °F, condition
@@ -22,14 +22,6 @@ the panel):
   snow, storm, hail), today's sunrise/sunset, and three days with low on the
   left and high on the right in both units. Location is set in the control
   pane (defaults to the HTPC's IP geolocation).
-- **Quote** (off by default — *Quote on panel* in the pane turns it back on)
-  — Wikiquote's Quote of the Day (`quotes.py`), always shown with
-  who said it, the work, and the year. A quote is only used if it can be
-  found on the author's Wikiquote page in a sourced section (never Disputed /
-  Misattributed) with a year, fits in three lines, and hasn't been shown or
-  vetoed; otherwise a replacement comes from the QOTD archive before
-  2026-10-07, so fallbacks can't collide with the live feed. With it off the
-  engraving takes the bottom of the panel.
 - **Animal engraving** — a daily historical animal print from Wikimedia
   Commons, rotating across seven corpuses: Iconographia Zoologica (Amsterdam,
   1700-1880, the reliable backstop), Gessner's 1551 *Historiae animalium*,
@@ -97,12 +89,9 @@ docker logs apps-inkplate-1 -f
   redraws at its next wake; in tethered mode that's within seconds.
 - **Next animal** — advances the daily animal for layout testing. Persisted
   as an offset, so the preview and the device stay in sync.
-- **Next quote** — replaces today's quote with another (the current one is
-  in the shown-history, so it won't come back).
-- **Now showing** — the current animal and quote. **Veto image** bans that
-  Commons file for good (the animal stays in rotation, drawn from another
-  plate); **Veto quote** bans that quote for good. Neither can be undone from
-  the pane.
+- **Now showing** — the current animal. **Veto image** bans that Commons
+  file for good (the animal stays in rotation, drawn from another plate).
+  It can't be undone from the pane.
 - **Configuration** — screen picker, **panel rotation** (0/90/180/270°,
   the panel's clockwise turn — 90° or 270° hangs it vertically and the
   dashboard switches to its portrait layout; the device still receives a
@@ -112,7 +101,7 @@ docker logs apps-inkplate-1 -f
   centred row along the bottom border; *stack*: weather and caption on top,
   engraving below — see `docs/layouts/`), refresh cadence (how often the panel
   redraws — keeps the temperature current), animal cadence in days (default
-  daily), quote on/off, weather and snow locations, tethered mode. Applies
+  daily), weather and snow locations, tethered mode. Applies
   live; the device picks up cadence changes at its next check-in.
 - **Device check-ins** — battery voltage, Wi-Fi signal, boot count, errors.
   The header badge turns red if the device misses ~2.5 wake windows.
