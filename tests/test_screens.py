@@ -196,30 +196,58 @@ def _figure_plate(w=900, h=1200):
     return sheet
 
 
+def _ink_bbox(img):
+    return img.convert("L").point(lambda v: 255 if v < 128 else 0).getbbox()
+
+
 def test_draw_art_zooms_a_contained_figure_into_the_box():
     """A figure is leaned into by ART_ZOOM rather than floated in its own
     paper: the pasted plate fills the box's short axis fully and is cropped,
-    never larger than the box."""
+    never larger than the box, and the figure itself is drawn larger."""
     import tempfile
     from PIL import Image
     box = (100, 100, 1100, 1100)
 
     def draw():
-        return screens._draw_art(Image.new("RGB", (1200, 1200), "white"),
-                                 {"path": f.name}, box, lambda v: v, lambda v: v,
-                                 mode="centered")
+        img = Image.new("RGB", (1200, 1200), "white")
+        rect = screens._draw_art(img, {"path": f.name}, box, lambda v: v,
+                                 lambda v: v, mode="centered")
+        return rect, _ink_bbox(img)
     with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
         _figure_plate().save(f.name)
-        zoomed = draw()
+        zoomed, zoomed_ink = draw()
         screens.ART_ZOOM, keep = 1.0, screens.ART_ZOOM
         try:
-            fitted = draw()
+            _, fitted_ink = draw()
         finally:
             screens.ART_ZOOM = keep
     x0, y0, x1, y1 = zoomed
     assert x0 >= box[0] and y0 >= box[1] and x1 <= box[2] and y1 <= box[3]
     assert y1 - y0 == 1000                              # fills the limiting axis
-    assert (x1 - x0) > (fitted[2] - fitted[0]) * 1.1     # visibly larger than a fit
+    # visibly larger than a fit
+    assert zoomed_ink[2] - zoomed_ink[0] > (fitted_ink[2] - fitted_ink[0]) * 1.1
+
+
+def test_centered_art_fades_on_paper_margin_not_the_subject():
+    """Hero art is drawn with HERO_CONTEXT of sheet around the subject where
+    the box has room, so the HERO_FADE dissolves paper, not the figure: ink
+    at the very edge of the subject crop stays solid."""
+    import tempfile
+    from PIL import Image
+    box = (0, 0, 1600, 1000)                     # wide: room left and right
+    with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
+        _figure_plate().save(f.name)
+        img = Image.new("RGB", (1600, 1000), "white")
+        rect = screens._draw_art(img, {"path": f.name}, box, lambda v: v,
+                                 lambda v: v, mode="centered")
+    ink = _ink_bbox(img)
+    # paper drawn beyond the figure on both sides, wider than the fade
+    assert ink[0] - rect[0] > screens.HERO_FADE
+    assert rect[2] - ink[2] > screens.HERO_FADE
+    # the figure's own edge column is solid ink, not faded towards white
+    mid = (ink[1] + ink[3]) // 2
+    assert img.convert("L").getpixel((ink[0] + 1, mid)) < 80
+    assert img.convert("L").getpixel((ink[2] - 2, mid)) < 80
 
 
 def test_draw_art_applies_per_image_rotation():

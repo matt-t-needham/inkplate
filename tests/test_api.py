@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+import config
 import main
 import palette
 import screens
@@ -100,7 +101,8 @@ def test_display_png_is_indexed_spectra(client):
 def test_display_meta_tethered_switch(client):
     meta = client.get("/api/display/meta").json()
     assert meta["tethered"] is False
-    assert meta["sleep_seconds"] == state.load_config()["refresh_minutes"] * 60
+    # sleeps to the next wake slot: at most one cadence, never less than the grace
+    assert config.WAKE_GRACE_S <= meta["sleep_seconds"] <= state.load_config()["refresh_minutes"] * 60 + config.WAKE_GRACE_S
 
     client.post("/api/config", json={"tethered": True, "tethered_poll_seconds": 20})
     meta = client.get("/api/display/meta").json()

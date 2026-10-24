@@ -74,6 +74,15 @@ The device is told how long to sleep in every response (`sleep_seconds`).
 Changing cadence in the pane needs no reflash; a device that misses the memo
 simply picks it up next wake. Bounds enforced server-side: 1 min–24 h.
 
+**Anchored slots (2026-10-24):** `sleep_seconds` is the time to the next
+wake slot, not a flat interval. Slots run every `refresh_minutes` from
+`refresh_anchor` (local "HH:MM", default 06:00) and restart there each day
+(`renderer.slot_window`), so a cadence that doesn't divide 24 h (150 min)
+still refreshes at 06:00 — the day's last gap is just shorter (04:30 → 06:00).
+A render is stale once it predates the current slot. The RTC drifts, so a wake
+within `WAKE_GRACE_S` (10 min) before a slot is treated as that slot instead
+of sleeping a few minutes and waking again.
+
 ## 8. FastAPI service on port 3008, compose-managed, test-gated Docker build
 Follows the house pattern exactly (bix-demucs structure, bix-ai's
 test-gate Dockerfile). 3008 is used (3007 in the map was free on paper but an unmanaged "Whats Playing?" host service already held it). Logs rotate to

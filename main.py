@@ -114,7 +114,7 @@ async def _rerender(why: str) -> dict:
 @app.post("/api/config")
 async def api_config(request: Request):
     body = await request.json()
-    allowed = {"refresh_minutes", "screen", "rotation", "portrait_layout",
+    allowed = {"refresh_minutes", "refresh_anchor", "screen", "rotation", "portrait_layout",
                "tethered", "tethered_poll_seconds",
                "latitude", "longitude", "location_name",
                "animal_period_days",
@@ -229,7 +229,7 @@ async def api_preview(mode: str = "panel"):
 # ── Device API (what the firmware calls) ──────────────────────────────────────
 
 def _device_meta(cfg: dict, m: dict | None) -> dict:
-    poll = cfg["tethered_poll_seconds"] if cfg["tethered"] else cfg["refresh_minutes"] * 60
+    poll = cfg["tethered_poll_seconds"] if cfg["tethered"] else renderer.sleep_seconds(cfg)
     return {
         "image_version": m["image_version"] if m else cfg["image_version"],
         "sleep_seconds": poll,

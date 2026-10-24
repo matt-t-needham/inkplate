@@ -71,3 +71,35 @@ def test_rotation_change_bumps_version_and_rerenders(data_dir):
     m2 = renderer.ensure_fresh()          # stale: the hanging changed
     assert m2["rendered_at"] != m1["rendered_at"]
     assert m2["image_version"] == m1["image_version"] + 1   # device must redraw
+
+
+def test_wake_slots_restart_at_the_anchor_each_day():
+    """2.5h slots from 06:00: the day's last slot is 04:30 and the next is
+    06:00 again, not 07:00 — the morning refresh never drifts."""
+    from datetime import datetime as dt
+    w = renderer.slot_window
+    assert w(dt(2026, 10, 24, 6, 10), 150, "06:00") == (dt(2026, 10, 24, 6, 0), dt(2026, 10, 24, 8, 30))
+    assert w(dt(2026, 10, 24, 23, 45), 150, "06:00") == (dt(2026, 10, 24, 23, 30), dt(2026, 10, 25, 2, 0))
+    assert w(dt(2026, 10, 25, 5, 0), 150, "06:00") == (dt(2026, 10, 25, 4, 30), dt(2026, 10, 25, 6, 0))
+    assert w(dt(2026, 10, 25, 6, 0), 150, "06:00") == (dt(2026, 10, 25, 6, 0), dt(2026, 10, 25, 8, 30))
+
+
+def test_early_wake_counts_as_the_coming_slot():
+    """The device clock drifts: waking at 05:55 renders the 06:00 frame and
+    sleeps to 08:30, rather than sleeping 5 minutes and waking again."""
+    from datetime import datetime as dt
+    cfg = {"refresh_minutes": 150, "refresh_anchor": "06:00"}
+    early = dt(2026, 10, 24, 5, 55).timestamp()
+    start, nxt = renderer.schedule(cfg, early)
+    assert start == dt(2026, 10, 24, 6, 0).timestamp()
+    assert renderer.sleep_seconds(cfg, early) == (155 * 60)
+    late = dt(2026, 10, 24, 6, 7).timestamp()
+    assert renderer.sleep_seconds(cfg, late) == (143 * 60)
+
+
+def test_refresh_anchor_validated(data_dir):
+    import pytest
+    assert state.update_config(refresh_anchor="6:00")["refresh_anchor"] == "06:00"
+    for bad in ("25:00", "6", "six"):
+        with pytest.raises(ValueError):
+            state.update_config(refresh_anchor=bad)
