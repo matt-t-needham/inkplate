@@ -169,10 +169,12 @@ SCENE_INK_COVERAGE = 0.50
 ART_BLEED = 0.075
 ART_FADE_LEFT = 300
 ART_FADE_EDGE = 120
-# A contained figure is scaled past its fit by this much and the overflow
-# cropped around its ink centroid: the subject box keeps a margin of paper
-# and a fit-to-box plate still floats in white, so lean in. The overflow is
-# at most 1 - 1/ART_ZOOM of the long axis, which the edge fades swallow.
+# A contained figure is scaled past its fit by up to this much and the
+# overflow cropped: the subject box keeps a margin of paper and a fit-to-box
+# plate still floats in white, so lean in — but only as far as that paper
+# goes. The crop never cuts ink: a figure whose ink fills its box is drawn
+# at fit (cutting around the ink centroid took the lark's head off, because
+# its rock and plant outweigh its neck and beak).
 ART_ZOOM = 1.15
 
 
@@ -561,13 +563,28 @@ def _ink_centroid(art: Image.Image) -> tuple[float, float]:
     return (sx / n + 0.5) * art.width / sw, (sy / n + 0.5) * art.height / sh
 
 
+def _ink_span(art: Image.Image) -> tuple[float, float, float, float]:
+    """Where the ink starts and stops on each axis of a subject crop, in its
+    own pixels: the part a lean-in crop must never cut."""
+    mask, (sw, sh) = _ink_mask(art)
+    cols, rows = _profiles(mask, (sw, sh))
+
+    def span(prof):
+        idx = [i for i, v in enumerate(prof) if v]
+        return (idx[0], idx[-1] + 1) if idx else (0, len(prof))
+    (x0, x1), (y0, y1) = span(cols), span(rows)
+    return (x0 * art.width / sw, y0 * art.height / sh,
+            x1 * art.width / sw, y1 * art.height / sh)
+
+
 def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
               mode: str = "bleed"):
     """The engraving, fitted into a fixed art box (x0, y0, x1, y1) in frame
     pixels. The box is defined in panel coordinates, not derived from the
     image, so every plate lands in the same place whatever its dimensions.
-    A figure is contained, then leaned into by ART_ZOOM (the overflow is
-    paper margin, cut around the ink centroid); a scene covers the box.
+    A figure is contained, then leaned into by up to ART_ZOOM where its
+    subject box has paper to spare (the overflow is cut around the ink
+    centroid, never through ink); a scene covers the box.
     `animal["rotation"]` (clockwise degrees, from config) turns a plate
     that was scanned sideways before anything else looks at it.
 
@@ -595,21 +612,34 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
         plate = plate.rotate(-rot, expand=True)
     sheet, sb, is_scene = _prep_plate(plate)
     art = sheet.crop(sb)
-    fit = max if is_scene else min
-    scale = fit(bw / art.width, bh / art.height)
-    if not is_scene:
-        scale *= ART_ZOOM
+    if is_scene:
+        scale = max(bw / art.width, bh / art.height)
+    else:
+        scale = min(bw / art.width, bh / art.height)
+        # Keep the hero's soft edge on paper too, not on the drawing.
+        ix = X(HERO_FADE) if mode == "centered" else 0
+        iy = Y(HERO_FADE) if mode == "centered" else 0
+        ink = _ink_span(art)
+        scale = max(scale, min(scale * ART_ZOOM,
+                               (bw - 2 * ix) / (ink[2] - ink[0]),
+                               (bh - 2 * iy) / (ink[3] - ink[1])))
     art = art.resize((max(1, round(art.width * scale)),
                       max(1, round(art.height * scale))), Image.LANCZOS)
     if art.width > bw or art.height > bh:
-        # Trim the overflow: a scene around its centre, a zoomed figure
-        # around its ink centroid so the body stays and the margin goes.
+        # Trim the overflow: a scene around its centre; a zoomed figure
+        # around its ink centroid, but only ever through paper — the window
+        # is clamped so the ink span stays whole.
         if is_scene:
             cx, cy = art.width / 2, art.height / 2
+            lo_x = lo_y = 0
+            hi_x, hi_y = art.width - bw, art.height - bh
         else:
             cx, cy = _ink_centroid(art)
-        ox = max(0, min(art.width - bw, round(cx - bw / 2)))
-        oy = max(0, min(art.height - bh, round(cy - bh / 2)))
+            ix0, iy0, ix1, iy1 = (v * scale for v in ink)
+            lo_x, hi_x = max(0, ix1 + ix - bw), min(art.width - bw, ix0 - ix)
+            lo_y, hi_y = max(0, iy1 + iy - bh), min(art.height - bh, iy0 - iy)
+        ox = round(max(lo_x, min(hi_x, cx - bw / 2))) if art.width > bw else 0
+        oy = round(max(lo_y, min(hi_y, cy - bh / 2))) if art.height > bh else 0
         art = art.crop((ox, oy, ox + min(bw, art.width), oy + min(bh, art.height)))
     else:
         ox = oy = 0

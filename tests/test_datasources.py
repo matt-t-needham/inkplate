@@ -6,6 +6,19 @@ import pytest
 import datasources
 
 
+def _plate_bytes() -> bytes:
+    """A small plate the faint-image check accepts: a figure on paper."""
+    import io
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (300, 400), (240, 235, 220))
+    ImageDraw.Draw(im).ellipse([80, 100, 220, 320], fill=(40, 35, 30))
+    buf = io.BytesIO(); im.save(buf, "JPEG")
+    return buf.getvalue()
+
+
+PLATE = _plate_bytes()
+
+
 @pytest.fixture()
 def no_network(monkeypatch):
     """Any un-stubbed HTTP call in these tests is a bug — fail loudly."""
@@ -149,7 +162,7 @@ def test_animal_filters_to_genus_and_parses_fields(data_dir, no_network, monkeyp
     day = date(2026, 9, 17)
     _pin(monkeypatch, day, ("fox", "Vulpes", "the Northern Hemisphere", "mammal"))
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: COMMONS_RAW)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"jpegbytes")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
 
     a = datasources.get_animal(day)
     assert a["common_name"] == "fox"
@@ -160,7 +173,7 @@ def test_animal_filters_to_genus_and_parses_fields(data_dir, no_network, monkeyp
     assert a["collection"] == "iz"
     assert a["native"] == "the Northern Hemisphere"
     assert a["for_date"] == day.isoformat()
-    assert (data_dir / "cache" / "animal.jpg").read_bytes() == b"jpegbytes"
+    assert (data_dir / "cache" / "animal.jpg").read_bytes() == PLATE
 
 
 def test_animal_stale_fallback(data_dir, no_network, monkeypatch):
@@ -196,7 +209,7 @@ def test_animal_skips_anatomical_plates(data_dir, no_network, monkeypatch):
     fetched = []
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
     monkeypatch.setattr(datasources, "_get_bytes",
-                        lambda url, **k: fetched.append(url) or b"img")
+                        lambda url, **k: fetched.append(url) or PLATE)
     a = datasources.get_animal(day)
     assert a["sci_name"] == "Bradypus tridactylus"
     assert fetched == ["https://thumb.example/sloth.jpg"]
@@ -222,7 +235,7 @@ def test_animal_falls_through_collections(data_dir, no_network, monkeypatch):
         }}}
 
     monkeypatch.setattr(datasources, "_get_json", fake_json)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"rhino")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
     # Rotation may start at either collection; the empty one can never win.
     a = datasources.get_animal(day)
     assert a["collection"] == "gessner"
@@ -251,7 +264,7 @@ def test_birds_only_collections_excluded_for_mammals(data_dir, no_network, monke
                   "imageinfo": [{"thumburl": "https://thumb.example/fox.jpg"}]}}}}
 
     monkeypatch.setattr(datasources, "_get_json", fake_json)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"fox")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
     a = datasources.get_animal(day)
     assert a["collection"] == "any"
     assert all("BIRDQ" not in q for q in queries)
@@ -271,7 +284,7 @@ def test_two_word_latin_requires_full_binomial(data_dir, no_network, monkeypatch
     fetched = []
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
     monkeypatch.setattr(datasources, "_get_bytes",
-                        lambda url, **k: fetched.append(url) or b"img")
+                        lambda url, **k: fetched.append(url) or PLATE)
     a = datasources.get_animal(day)
     assert a["sci_name"] == "Canis lupus"
     assert fetched == ["https://thumb.example/wolf.jpg"]  # never the jackal
@@ -287,7 +300,7 @@ def test_two_word_latin_no_genus_fallback(data_dir, no_network, monkeypatch):
               "imageinfo": [{"thumburl": "https://thumb.example/jackal.jpg"}]},
     }}}
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
     assert datasources.get_animal(day) is None
 
 
@@ -317,7 +330,7 @@ def test_animal_period_days_holds_steady(data_dir, no_network, monkeypatch):
     calls = []
     monkeypatch.setattr(datasources, "_get_json",
                         lambda *a, **k: calls.append(1) or COMMONS_RAW)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
 
     first = datasources.get_animal(day, period_days=7)
     for i in range(1, 7):
@@ -332,7 +345,7 @@ def test_animal_offset_changes_slot(data_dir, no_network, monkeypatch):
     day = date(2026, 9, 17)
     _pin(monkeypatch, day, ("fox", "Vulpes", "the Northern Hemisphere", "mammal"))
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: COMMONS_RAW)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
     a = datasources.get_animal(day, offset=0, period_days=30)
     b = datasources.get_animal(day, offset=1, period_days=30)
     assert b["slot"] == a["slot"] + 1
@@ -348,7 +361,7 @@ def test_vetoed_image_is_replaced_by_another_plate(data_dir, no_network, monkeyp
               "imageinfo": [{"thumburl": "https://thumb.example/fox2.jpg"}]},
     }}}
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
 
     first = datasources.get_animal(day)
     assert first["file"].startswith("File:Vulpes vulpes")
@@ -366,7 +379,7 @@ def test_cached_animal_without_file_is_refetched(data_dir, no_network, monkeypat
     day = date(2026, 9, 17)
     _pin(monkeypatch, day, ("fox", "Vulpes", "the Northern Hemisphere", "mammal"))
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: COMMONS_RAW)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
     a = datasources.get_animal(day)
     old = dict(a); old.pop("file")
     datasources._cache_write("animal.json", {"fetched_at": 0, "data": old})
@@ -392,14 +405,13 @@ def test_prefers_a_plate_scan_over_a_photograph_of_one(data_dir, no_network, mon
     """Both are usable, but a scan of the plate beats someone's photo of it."""
     day = date(2026, 9, 17)
     _pin(monkeypatch, day, ("toucan", "Ramphastos", "South America", "bird"),
-         collections=[{"key": "gould", "query": "GOULD {common}",
-                       "artist": "John Gould", "place": "London",
-                       "years": "1840-1881", "kinds": {"bird"}}])
+         collections=[{**datasources.COLLECTIONS[6]}])
     raw = {"query": {"pages": {
         "1": {"title": "File:Ramphastos swainsonii (chestnut-mandibled toucan).jpg",
               "imageinfo": [{"thumburl": "https://thumb.example/photo.jpg",
                              "extmetadata": {
                                  "Artist": {"value": "James St. John"},
+                                 "ImageDescription": {"value": "Plate from John Gould's A Monograph of the Ramphastidae"},
                                  "DateTimeOriginal": {"value": "2011-06-10 12:29:20"}}}]},
         "2": {"title": "File:Ramphastos brevis Gould.jpg",
               "imageinfo": [{"thumburl": "https://thumb.example/plate.jpg",
@@ -408,7 +420,7 @@ def test_prefers_a_plate_scan_over_a_photograph_of_one(data_dir, no_network, mon
     fetched = []
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
     monkeypatch.setattr(datasources, "_get_bytes",
-                        lambda url, **k: fetched.append(url) or b"img")
+                        lambda url, **k: fetched.append(url) or PLATE)
     a = datasources.get_animal(day)
     assert fetched == ["https://thumb.example/plate.jpg"]
     assert a["artist"] == "John Gould"      # never the 2011 photographer
@@ -420,7 +432,7 @@ def test_year_falls_back_to_file_date_then_collection(data_dir, no_network, monk
             "place": "London", "years": "1840-1881", "kinds": {"bird"}}
     _pin(monkeypatch, day, ("toucan", "Ramphastos", "South America", "bird"),
          collections=[coll])
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
 
     # No year in the title, but the file records an 1835 original date.
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: {"query": {"pages": {
@@ -444,20 +456,19 @@ def test_photograph_is_used_but_credits_the_original_artist(data_dir, no_network
     must not date the work to the day of the photo."""
     day = date(2026, 9, 17)
     _pin(monkeypatch, day, ("toucan", "Ramphastos", "South America", "bird"),
-         collections=[{"key": "gould", "query": "GOULD {common}",
-                       "artist": "John Gould", "place": "London",
-                       "years": "1840-1881", "kinds": {"bird"}}])
+         collections=[{**datasources.COLLECTIONS[6]}])
     raw = {"query": {"pages": {
         "1": {"title": "File:Ramphastos swainsonii (chestnut-mandibled toucan).jpg",
               "imageinfo": [{"thumburl": "https://thumb.example/photo.jpg",
                              "extmetadata": {
                                  "Artist": {"value": "James St. John"},
+                                 "ImageDescription": {"value": "Plate from John Gould's A Monograph of the Ramphastidae"},
                                  "DateTimeOriginal": {"value": "2011-06-10 12:29:20"}}}]},
     }}}
     fetched = []
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
     monkeypatch.setattr(datasources, "_get_bytes",
-                        lambda url, **k: fetched.append(url) or b"img")
+                        lambda url, **k: fetched.append(url) or PLATE)
     a = datasources.get_animal(day)
     assert fetched == ["https://thumb.example/photo.jpg"]   # photo is fine
     assert a["artist"] == "John Gould"                      # original credited
@@ -488,7 +499,7 @@ def test_explicit_unknown_artist_prints_nothing(data_dir, no_network, monkeypatc
         "imageinfo": [{"thumburl": "u", "extmetadata": {
             "Artist": {"value": "<span>Unknown author</span><span>Unknown author</span>"}}}]}}}}
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
     assert datasources.get_animal(day)["artist"] is None
 
 
@@ -503,7 +514,7 @@ def test_absent_artist_still_uses_the_collection(data_dir, no_network, monkeypat
         "title": "File:Corvus corax - 1850.jpg",
         "imageinfo": [{"thumburl": "u"}]}}}}
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
     assert datasources.get_animal(day)["artist"] == "John Gould"
 
 
@@ -559,9 +570,166 @@ def test_genus_must_lead_not_trail(data_dir, no_network, monkeypatch):
     def raw(titles):
         return {"query": {"pages": {str(i): {"title": t, "imageinfo": [{"thumburl": "u"}]}
                                     for i, t in enumerate(titles)}}}
-    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: b"img")
+    monkeypatch.setattr(datasources, "_get_bytes", lambda *a, **k: PLATE)
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw(impostors))
     assert datasources.get_animal(day) is None
     monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw(impostors + [real]))
     a = datasources.get_animal(day)
     assert a["file"] == real and a["sci_name"] == "Papilio machaon"
+
+
+GOULD = {**datasources.COLLECTIONS[6]}
+
+
+def _page(title, url, **meta):
+    return {"title": title, "imageinfo": [{"thumburl": url, "extmetadata": {
+        k: {"value": v} for k, v in meta.items()}}]}
+
+
+def _serve(monkeypatch, *pages):
+    fetched = []
+    raw = {"query": {"pages": {str(i): p for i, p in enumerate(pages)}}}
+    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
+    monkeypatch.setattr(datasources, "_get_bytes",
+                        lambda url, **k: fetched.append(url) or PLATE)
+    return fetched
+
+
+def test_file_outside_the_corpus_is_rejected(data_dir, no_network, monkeypatch):
+    """Full-text search for "John Gould quail" returned a light aircraft and
+    "John Gould dove" a 2023 wildlife photo; neither is a Gould plate, and a
+    title naming the beast doesn't make it one."""
+    day = date(2026, 9, 17)
+    _pin(monkeypatch, day, ("quail", "Coturnix", "Eurasia & Africa", "bird"),
+         collections=[GOULD])
+    fetched = _serve(
+        monkeypatch,
+        _page("File:Quail 4.jpg", "https://t/plane.jpg",
+              ImageDescription="Aerosport Quail", Categories="Aerosport Quail"),
+        _page("File:Quail in a sanctuary 2023.jpg", "https://t/photo.jpg",
+              DateTimeOriginal="2023-04-18 13:45:50", Artist="Someone"),
+        _page("File:Young Jay Gould and his quail.jpg", "https://t/financier.jpg",
+              Categories="Jay Gould"))
+    assert datasources.get_animal(day) is None
+    assert fetched == []
+
+    fetched = _serve(
+        monkeypatch,
+        _page("File:Quail 4.jpg", "https://t/plane.jpg",
+              ImageDescription="Aerosport Quail"),
+        _page("File:Coturnix coturnix (Common Quail).jpg", "https://t/plate.jpg",
+              Categories="Lithographs by John Gould and Henry Constantine Richter"))
+    assert datasources.get_animal(day)["file"] == "File:Coturnix coturnix (Common Quail).jpg"
+    assert fetched == ["https://t/plate.jpg"]
+
+
+def test_anatomy_in_the_description_is_rejected(data_dir, no_network, monkeypatch):
+    """A skull on a plinth titled only "Hyrax Buffon 1789": the title is
+    innocent, the description and categories are not."""
+    day = date(2026, 9, 17)
+    _pin(monkeypatch, day, ("hyrax", "Hyrax", "Africa & Arabia", "mammal"),
+         collections=[{**datasources.COLLECTIONS[2]}])
+    fetched = _serve(
+        monkeypatch,
+        _page("File:Hyrax Buffon 1789.png", "https://t/skull.png",
+              ImageDescription="Skull of Procavia capensis, in the Histoire naturelle",
+              Categories="Procavia capensis skulls"))
+    assert datasources.get_animal(day) is None
+    assert fetched == []
+
+
+def test_common_name_namesake_is_rejected_by_its_taxon(data_dir, no_network,
+                                                       monkeypatch):
+    """"The Turkey Buzzard" names a turkey and is filed under Cathartes aura.
+    A common-name match whose taxa name another genus is a namesake — but a
+    Latin match is trusted over the taxa, whose genus is often today's, not
+    the period's (our colugo is Galeopithecus; Commons says Galeopterus)."""
+    day = date(2026, 9, 17)
+    catesby, iz = {**datasources.COLLECTIONS[4]}, {**datasources.COLLECTIONS[0]}
+    _pin(monkeypatch, day, ("turkey", "Meleagris", "North America", "bird"),
+         collections=[catesby])
+    fetched = _serve(
+        monkeypatch,
+        _page("File:The Turkey Buzzard.jpg", "https://t/vulture.jpg",
+              Categories="Cathartes aura (illustrations)|The natural history of Carolina"),
+        _page("File:The Wild Turkey.jpg", "https://t/turkey.jpg",
+              Categories="Meleagris gallopavo (illustrations)|The natural history of Carolina"))
+    assert datasources.get_animal(day)["file"] == "File:The Wild Turkey.jpg"
+
+    _pin(monkeypatch, day, ("colugo", "Galeopithecus", "Southeast Asia", "mammal"),
+         collections=[iz])
+    (data_dir / "cache" / "animal.json").unlink()
+    _serve(monkeypatch, _page(
+        "File:Galeopithecus rufus - Iconographia Zoologica - UBA01 IZ19700101.tif",
+        "https://t/colugo.jpg", Categories="Galeopterus variegatus (illustrations)"))
+    assert datasources.get_animal(day)["sci_name"] == "Galeopithecus rufus"
+
+
+def test_new_world_corpus_skipped_for_old_world_animals(data_dir, no_network,
+                                                        monkeypatch):
+    """Catesby and Audubon drew American fauna: their "large Lark" is the
+    meadowlark and their "Vulgo Pheasant" the ruffed grouse. An animal native
+    only to the Old World is never looked for there."""
+    day = date(2026, 9, 17)
+    catesby = {**datasources.COLLECTIONS[4]}
+    _pin(monkeypatch, day, ("lark", "Alauda", "Eurasia & North Africa", "bird"),
+         collections=[catesby])
+    fetched = _serve(monkeypatch, _page(
+        "File:Alauda magna - The large Lark.jpg", "https://t/meadowlark.jpg",
+        ImageDescription="Catesby, The natural history of Carolina"))
+    assert datasources.get_animal(day) is None
+    assert fetched == []
+    for native in ("worldwide", "the Northern Hemisphere", "North America",
+                   "wetlands of Eurasia & America", "the Mediterranean & Atlantic"):
+        assert datasources._could_be_new_world(native), native
+    for native in ("Eurasia", "Asia", "Australia", "Eurasia & Africa", "New Zealand"):
+        assert not datasources._could_be_new_world(native), native
+
+
+def test_known_namesakes_are_rejected(data_dir, no_network, monkeypatch):
+    """"Squilla mantis" is the mantis shrimp, not a praying mantis — but the
+    same shape, "Phascolomys wombat", is the wombat under its period genus,
+    so only the listed NAMESAKES are refused."""
+    day = date(2026, 9, 17)
+    _pin(monkeypatch, day, ("mantis", "Mantis", "warm regions worldwide", "invert"))
+    _serve(monkeypatch, _page(
+        "File:Squilla mantis - Print - Iconographia Zoologica - UBA01 IZ1.tif",
+        "https://t/shrimp.jpg"))
+    assert datasources.get_animal(day) is None
+    _serve(monkeypatch, _page(
+        "File:Mantis religiosa - Print - Iconographia Zoologica - UBA01 IZ2.tif",
+        "https://t/mantis.jpg"))
+    assert datasources.get_animal(day)["sci_name"] == "Mantis religiosa"
+    _pin(monkeypatch, day, ("wombat", "Vombatus", "Australia", "mammal"))
+    (data_dir / "cache" / "animal.json").unlink()
+    _serve(monkeypatch, _page(
+        "File:Phascolomys wombat - 1872 - Print - Iconographia Zoologica - UBA01 IZ3.tif",
+        "https://t/wombat.jpg"))
+    assert datasources.get_animal(day)["file"].startswith("File:Phascolomys wombat")
+
+
+def test_faint_or_blank_plate_falls_to_the_next_in_the_pool(data_dir, no_network,
+                                                            monkeypatch):
+    """A blank scan or a faint pencil sketch is skipped for the next file in
+    the pool; a collection whose candidates are all blank is passed over."""
+    import io
+    from PIL import Image
+    buf = io.BytesIO(); Image.new("RGB", (300, 400), (240, 235, 220)).save(buf, "JPEG")
+    blank = buf.getvalue()
+    day = date(2026, 9, 17)
+    _pin(monkeypatch, day, ("tapir", "Tapirus", "South America & Asia", "mammal"))
+    pages = [_page(f"File:Tapirus spec. - Print - Iconographia Zoologica - UBA01 IZ{i}.tif",
+                   f"https://t/{i}.jpg") for i in range(2)]
+    raw = {"query": {"pages": {str(i): p for i, p in enumerate(pages)}}}
+    monkeypatch.setattr(datasources, "_get_json", lambda *a, **k: raw)
+    slot = datasources.slot_for(day)
+    bad = f"https://t/{slot % 2}.jpg"
+    monkeypatch.setattr(datasources, "_get_bytes",
+                        lambda url, **k: blank if url == bad else PLATE)
+    a = datasources.get_animal(day)
+    assert a["file"] == pages[(slot + 1) % 2]["title"]
+
+    (data_dir / "cache" / "animal.json").unlink()
+    monkeypatch.setattr(datasources, "_get_bytes", lambda url, **k: blank)
+    assert datasources.get_animal(day) is None
+    assert datasources._too_faint(b"not an image")

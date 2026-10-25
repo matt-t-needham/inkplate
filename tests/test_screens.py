@@ -201,9 +201,10 @@ def _ink_bbox(img):
 
 
 def test_draw_art_zooms_a_contained_figure_into_the_box():
-    """A figure is leaned into by ART_ZOOM rather than floated in its own
-    paper: the pasted plate fills the box's short axis fully and is cropped,
-    never larger than the box, and the figure itself is drawn larger."""
+    """A figure is leaned into rather than floated in its own paper — but
+    only as far as the paper goes: the pasted plate fills the box's short
+    axis, is never larger than the box, and its ink runs to within a fade
+    of the box edge without being cut."""
     import tempfile
     from PIL import Image
     box = (100, 100, 1100, 1100)
@@ -224,8 +225,36 @@ def test_draw_art_zooms_a_contained_figure_into_the_box():
     x0, y0, x1, y1 = zoomed
     assert x0 >= box[0] and y0 >= box[1] and x1 <= box[2] and y1 <= box[3]
     assert y1 - y0 == 1000                              # fills the limiting axis
-    # visibly larger than a fit
-    assert zoomed_ink[2] - zoomed_ink[0] > (fitted_ink[2] - fitted_ink[0]) * 1.1
+    # never smaller than a fit; here the subject box's own margin is thinner
+    # than the fade, so there is no paper to spend and it stays at fit
+    assert zoomed_ink[2] - zoomed_ink[0] >= fitted_ink[2] - fitted_ink[0]
+    # ...and no further: the whole figure is still there, top and bottom
+    assert zoomed_ink[1] >= box[1] and zoomed_ink[3] <= box[3]
+    # ink stops short of the box by about the fade, so the fade is on paper
+    assert zoomed_ink[3] - zoomed_ink[1] >= 1000 - 2 * screens.HERO_FADE - 12
+
+
+def test_lean_in_never_cuts_a_thin_top_off_a_heavy_figure():
+    """The lark: a heavy rock and plant under a thin neck and beak. The ink
+    centroid sits low, so cropping a zoomed plate around it took the whole
+    overflow off the top — the head. The thin top must survive."""
+    import tempfile
+    from PIL import Image, ImageDraw
+    sheet = _sheet(900, 1200)
+    d = ImageDraw.Draw(sheet)
+    d.rectangle([200, 700, 700, 1000], fill=(30, 30, 30))   # rock: the mass
+    d.rectangle([420, 200, 500, 700], fill=(30, 30, 30))    # neck and beak
+    box = (0, 0, 1200, 900)                                 # height-limited
+    with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
+        sheet.save(f.name)
+        img = Image.new("RGB", (1200, 900), "white")
+        screens._draw_art(img, {"path": f.name}, box, lambda v: v,
+                          lambda v: v, mode="centered")
+    g = img.convert("L")
+    top = _ink_bbox(img)[1]
+    # the neck's top end is drawn, near the top of the box, in solid ink
+    assert top < 60 + screens.HERO_FADE
+    assert min(g.getpixel((x, top + 2)) for x in range(img.width)) < 80
 
 
 def test_centered_art_fades_on_paper_margin_not_the_subject():

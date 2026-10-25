@@ -237,7 +237,7 @@ ANIMALS = [
     ("bear", "Ursus", "the Northern Hemisphere", "mammal"),
     ("hare", "Lepus", "the Northern Hemisphere", "mammal"),
     ("wolf", "Canis lupus", "Eurasia & North America", "mammal"),
-    ("lion", "Panthera leo", "Africa & India", "mammal"),
+    ("lion", "Felis leo", "Africa & India", "mammal"),
     ("tiger", "Panthera tigris", "Asia", "mammal"),
     ("elephant", "Elephas", "South Asia", "mammal"),
     ("rhinoceros", "Rhinoceros", "South Asia", "mammal"),
@@ -376,7 +376,7 @@ ANIMALS = [
     ("antelope", "Antilope", "Africa & Asia", "mammal"),
     ("gazelle", "Antilope gazella", "Africa & Arabia", "mammal"),
     ("bison", "Bison", "North America & Europe", "mammal"),
-    ("buffalo", "Bubalus", "South Asia", "mammal"),
+    ("buffalo", "Bos bubalis", "South Asia", "mammal"),
     ("mole", "Talpa", "Europe", "mammal"),
     ("weasel", "Mustela", "the Northern Hemisphere", "mammal"),
     ("marten", "Martes", "northern forests", "mammal"),
@@ -449,7 +449,7 @@ ANIMALS = [
     ("rattlesnake", "Crotalus", "the Americas", "reptile"),
     ("cobra", "Naja", "Africa & Asia", "reptile"),
     ("viper", "Vipera", "Eurasia", "reptile"),
-    ("alligator", "Alligator", "the American South", "reptile"),
+    ("alligator", "Crocodilus lucius", "the American South", "reptile"),
     ("gharial", "Gavialis", "Indian rivers", "reptile"),
     ("toad", "Bufo", "worldwide", "amphibian"),
     ("tree frog", "Hyla", "the Americas & Eurasia", "amphibian"),
@@ -472,28 +472,68 @@ ANIMALS = [
 # Historical corpuses on Commons. `query` is a Cirrus search template
 # ({latin}/{common}); `artist`/`place`/`years` back-fill the caption when the
 # file's own metadata is silent; `kinds` (None = any) gates eligibility.
+# `evidence` (case-insensitive regex) must match the file's title,
+# description, categories, artist or credit: the search is full-text, so
+# "John Gould quail" happily returns a light aircraft called the Quail and a
+# 2023 photo of a live dove. `new_world` corpora drew only American fauna, so
+# an Old World animal found there is a namesake (Catesby's "large Lark" is
+# the meadowlark; Audubon's "Vulgo Pheasant" is the ruffed grouse).
 COLLECTIONS = [
     {"key": "iz", "query": 'Iconographia Zoologica {latin}',
-     "artist": None, "place": "Amsterdam", "years": "1700-1880", "kinds": None},
+     "artist": None, "place": "Amsterdam", "years": "1700-1880", "kinds": None,
+     "evidence": r"Iconographia Zoologica|UBA01|University of Amsterdam"},
     {"key": "gessner", "query": 'Gessner "Historiae animalium" {latin}',
      "artist": "Conrad Gessner", "place": "Zürich", "years": "1551-1558",
-     "kinds": None},
+     "kinds": None, "evidence": r"Gess?ner|Historiae? animalium"},
     {"key": "buffon", "query": 'Buffon "Histoire naturelle" {latin}',
      "artist": "Buffon's engravers", "place": "Paris", "years": "1749-1788",
-     "kinds": None},
+     "kinds": None, "evidence": r"Buffon|Histoire naturelle"},
     {"key": "brehm", "query": '"Brehms Tierleben" {latin}',
      "artist": "Alfred Brehm", "place": "Leipzig", "years": "1863-1869",
-     "kinds": None},
+     "kinds": None, "evidence": r"Brehm"},
     {"key": "catesby", "query": 'Catesby "Natural History of Carolina" {common}',
      "artist": "Mark Catesby", "place": "England", "years": "1731-1743",
-     "kinds": {"bird", "reptile", "fish", "invert"}},
+     "kinds": {"bird", "reptile", "fish", "invert"},
+     "evidence": r"Catesby|natural history of Carolina", "new_world": True},
     {"key": "audubon", "query": 'Audubon "Birds of America" {common}',
      "artist": "John James Audubon", "place": "America", "years": "1827-1838",
-     "kinds": {"bird"}},
+     "kinds": {"bird"}, "evidence": r"Audubon|Birds of America",
+     "new_world": True},
     {"key": "gould", "query": 'John Gould {common}',
      "artist": "John Gould", "place": "London", "years": "1840-1881",
-     "kinds": {"bird"}},
+     "kinds": {"bird"},
+     # Not a bare "Gould": Jay Gould the financier is on Commons too.
+     "evidence": r"John Gould|Elizabeth Gould|J\.? (?:and|&) E\.? Gould|"
+                 r"\(Gould\)|Gould(?:Birds|'s)|H\. ?C\. Richter"},
 ]
+
+# A native range rules out a New World corpus when it names only Old World
+# places. Anything wide or vague ("worldwide", "the Northern Hemisphere",
+# "coastal seas") keeps it in — the other filters still apply.
+_OLD_WORLD = re.compile(
+    r"Eurasia|Europe|Africa|Asia|Arabia|India|China|Australia|New Guinea|"
+    r"New Zealand|Madagascar|Mauritius|Borneo|Sumatra|Mediterranean|"
+    r"Indo-Pacific|Southern Ocean|Antarctica|steppes")
+_NEW_WORLD_OR_WIDE = re.compile(
+    r"(?i)America|Caribbean|Amazon|Andes|Mexic|Atlantic|Sargasso|worldwide|"
+    r"Hemisphere|every continent|ocean|seas\b|coast|tropical|warm|northern|"
+    r"wetlands|rivers|reefs|cliffs|moors")
+
+
+def _could_be_new_world(native: str) -> bool:
+    return not _OLD_WORLD.search(native) or bool(_NEW_WORLD_OR_WIDE.search(native))
+
+
+# Titles that name an animal and depict another, where no general rule can
+# tell (a period genus that leads the title looks exactly like a namesake's:
+# "Phascolomys wombat" is the wombat, "Squilla mantis" the mantis shrimp).
+# Common name -> regex over the title. Add to it when a veto finds one.
+NAMESAKES = {
+    "mantis": r"\bSquilla\b",
+    "lion": r"(?i)chien[- ]lion|lion[- ]dog",
+    # Catesby's turkey vulture: "Buteo species Gallinae Pavonis".
+    "buzzard": r"(?i)turkey buzzard|Gallinae Pavonis",
+}
 
 ANIMAL_IMG = "animal.jpg"
 
@@ -516,6 +556,32 @@ def _clean_artist(s: str) -> str:
         words = words[:half]
     s = " ".join(words)
     return "" if _UNKNOWN_ARTIST.match(s) else s
+
+
+# A file is downloaded before anything can look at it, and some are nearly
+# empty: a blank scan, a faint pencil sketch on a mount card. Ink coverage of
+# the subject box (as the renderer finds it) separates them cleanly — those
+# measured 0.2-3.3%, the faintest real plate 20%.
+FAINT_INK = 0.05
+FAINT_RETRIES = 3   # downloads per collection before falling through
+
+
+def _too_faint(img: bytes) -> bool:
+    """True when an image carries next to no ink, or isn't an image at all."""
+    import io
+
+    from PIL import Image, UnidentifiedImageError
+
+    # Lazy: screens imports this module, and owns the ink analysis.
+    import screens
+    try:
+        art = Image.open(io.BytesIO(img)).convert("RGB")
+    except (UnidentifiedImageError, OSError) as e:
+        log.warning("downloaded plate is not a readable image: %s", e)
+        return True
+    sheet, box, _ = screens._prep_plate(art)
+    mask, (w, h) = screens._ink_mask(sheet.crop(box))
+    return sum(1 for v in mask.getdata() if v) / (w * h) < FAINT_INK
 
 
 def _try_collection(coll: dict, common: str, latin: str, slot: int,
@@ -555,13 +621,36 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int,
                                             _meta(p, "DateTimeOriginal"))]
         return bool(years) and max(years) >= 1900
     # Drop anatomical dissection plates (Dutch/French/English tags — a pile of
-    # sloth stomachs is not wall art) and whole-book Internet Archive dumps.
+    # sloth stomachs is not wall art; IZ files a hippo's jaw as "kaak" and a
+    # hornbill's beak as "snavel") and whole-book Internet Archive dumps.
     anatomical = ("ingewanden", "anatomie", "skelet", "schedel", "gebit",
                   "spieren", "embryo", "ontleed", "anatomy", "skeleton",
-                  "squelette", "glandes", "organes", "crane", "crâne")
+                  "squelette", "glandes", "organes", "crane", "crâne",
+                  "skull", "kaak", "snavel", "tanden", "hoorns", "baarmoeder",
+                  "geslachtsorganen", "maag", "darmen", "hersenen")
+    def _about(p) -> str:
+        """What the file says about itself beyond its title."""
+        return " ".join(_meta(p, k) for k in
+                        ("ImageDescription", "Categories", "Artist", "Credit"))
+
+    def _taxa(p) -> list[str]:
+        """Taxa Commons files the picture under ("Cathartes aura
+        (illustrations)"), which name the animal as it is known today."""
+        cats = p["imageinfo"][0].get("extmetadata", {}).get(
+            "Categories", {}).get("value", "")
+        return [c.removesuffix(" (illustrations)").strip()
+                for c in str(cats).split("|") if c.endswith(" (illustrations)")]
+
+    # The title *and* the file's own description and categories: a skull on a
+    # plinth is titled "Hyrax Buffon 1789" and only its description says so.
     pages = [p for p in pages if p.get("imageinfo")
              and "(IA " not in p.get("title", "")
-             and not any(t in p.get("title", "").lower() for t in anatomical)]
+             and not any(t in (p.get("title", "") + " " + _about(p)).lower()
+                         for t in anatomical)]
+    # The file must belong to the corpus the search was aimed at.
+    if coll.get("evidence"):
+        ev = re.compile(coll["evidence"], re.I)
+        pages = [p for p in pages if ev.search(p.get("title", "") + " " + _about(p))]
     # Require the beast's name in the file TITLE, not just the search match —
     # full-text search happily returns a page of sea monsters whose prose
     # merely mentions rhinos. A collection with no titled plate is skipped;
@@ -574,6 +663,13 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int,
     # be a whole word, or "butterfly" catches butterflyfish.
     latin_l = latin.lower()
 
+    # A plate found by its common name alone is checked against the taxa
+    # Commons files it under: "The Turkey Buzzard" names a turkey and is
+    # filed under Cathartes aura. A Latin match is not — the period genus
+    # often differs from today's (our colugo is Galeopithecus, Commons'
+    # Galeopterus), so its taxa would reject the right beast.
+    genus_l = latin.split()[0].lower()
+
     def names_beast(p) -> bool:
         t = p.get("title", "").removeprefix("File:")
         if " " in latin:
@@ -582,7 +678,12 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int,
         elif (re.match(rf"{re.escape(latin)}\b", t, re.I)
               or re.search(rf"\b{re.escape(latin)} [a-z]", t)):
             return True
-        return re.search(rf"(?i)\b{re.escape(common)}\b", t) is not None
+        if re.search(rf"(?i)\b{re.escape(common)}\b", t) is None:
+            return False
+        if common in NAMESAKES and re.search(NAMESAKES[common], t):
+            return False
+        taxa = _taxa(p)
+        return not taxa or any(x.split()[0].lower() == genus_l for x in taxa)
 
     pages = [p for p in pages if p["title"] not in vetoed]
     pool = [p for p in pages if names_beast(p)]
@@ -592,9 +693,15 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int,
     pool.sort(key=lambda p: p["title"])
     originals = [p for p in pool if not _is_modern_repro(p)]
     pool = originals or pool
-    pick = pool[slot % len(pool)]
-
-    img = _get_bytes(pick["imageinfo"][0]["thumburl"])
+    # The slot's pick, or the next ones in the pool if it turns out blank.
+    for k in range(min(FAINT_RETRIES, len(pool))):
+        pick = pool[(slot + k) % len(pool)]
+        img = _get_bytes(pick["imageinfo"][0]["thumburl"])
+        if not _too_faint(img):
+            break
+        log.info("skipped faint or blank plate %s", pick["title"])
+    else:
+        return None
     tmp = _cache_dir() / (ANIMAL_IMG + ".tmp")
     tmp.write_bytes(img)
     os.replace(tmp, _cache_dir() / ANIMAL_IMG)
@@ -682,8 +789,10 @@ def get_animal(day: date | None = None, offset: int = 0,
         return meta["data"]
 
     common, latin, native, kind = ANIMALS[slot % len(ANIMALS)]
-    eligible = [c for c in COLLECTIONS if c["kinds"] is None or kind in c["kinds"]]
-    rot = slot % len(eligible)
+    eligible = [c for c in COLLECTIONS
+                if (c["kinds"] is None or kind in c["kinds"])
+                and (not c.get("new_world") or _could_be_new_world(native))]
+    rot = slot % len(eligible) if eligible else 0
     for coll in eligible[rot:] + eligible[:rot]:
         try:
             data = _try_collection(coll, common, latin, slot, vetoed)
@@ -694,6 +803,9 @@ def get_animal(day: date | None = None, offset: int = 0,
             data.update({"common_name": common, "native": native,
                          "slot": slot, "for_date": day.isoformat()})
             _cache_write("animal.json", {"fetched_at": time.time(), "data": data})
+            # The only record of what hung on the wall on a given day.
+            log.info("animal for %s: %s via %s: %s", day.isoformat(), common,
+                     coll["key"], data["file"])
             return data
 
     _log_event(f"animal illustration fetch failed for {common} in all collections")

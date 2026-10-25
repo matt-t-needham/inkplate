@@ -189,6 +189,86 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 24. Bad plates and a beheaded lark: tighter validation, no-cut zoom (2026-10-25)
+
+Matt reported a run of bad images and a poorly cut top. Nothing recorded which
+file was shown on which day, so the fortnight 10-13…10-25 was replayed against
+live Commons (deterministic slots; search results drift, so this is a close
+reconstruction, not a record). Six of thirteen were wrong:
+
+| Day | Shown as | Actually | Why it passed |
+|---|---|---|---|
+| 10-17 | colugo | IZ sheet, half of it a skeleton sketch | no hint anywhere in the metadata — veto it |
+| 10-18 | hyrax | a skull on a plinth (Buffon) | anatomy only in description/categories |
+| 10-19 | turkey | "The Turkey Buzzard" (Catesby) — a vulture | common name matched as a whole word |
+| 10-20 | pheasant | Audubon's ruffed grouse, "Vulgo Pheasant" | same, and Audubon drew no pheasants |
+| 10-23 | dove | a 2023 wildlife photo | full-text "John Gould dove"; modern-photo fallback took it |
+| 10-25 am | nightingale | a photo of Florence Nightingale (Hering, 1858) | full-text "John Gould nightingale" (cycled away at 09:56) |
+| 10-25 | lark | Catesby's "large Lark" — the eastern meadowlark | *Alauda magna* in the title; Catesby drew no larks |
+
+The vetoed `Quail 4.jpg` (10-22) was the Aerosport Quail, a light aircraft.
+
+**Validation added** (`_try_collection` / `get_animal`):
+- **Corpus evidence.** Each collection has an `evidence` regex that the
+  title, description, categories, artist or credit must match. Kills the
+  aircraft and the dove photo; the modern-photo fallback still works for real
+  photographs *of a plate*, which name the book.
+- **Anatomy in the description and categories**, not just the title, plus
+  "skull".
+- **Namesakes by taxon.** A file matched only by the common name is rejected
+  when its Commons `<taxon> (illustrations)` categories name a different
+  genus. A Latin match is exempt: period genera often differ from Commons'
+  modern ones (our colugo is *Galeopithecus*, Commons files it under
+  *Galeopterus*), so the check would throw out right answers.
+- **New World corpora.** Catesby and Audubon are `new_world`; an animal whose
+  native range names only Old World places (`_could_be_new_world`) is never
+  looked for there. Vague ranges ("worldwide", "coastal seas") stay eligible.
+- **Known namesakes** (`NAMESAKES`, common name → title regex) for the
+  traps no rule can tell apart: "Squilla mantis" (mantis shrimp) has the same
+  shape as "Phascolomys wombat" (the wombat, period genus), so a general
+  "common name as another genus's epithet" rule was tried and dropped — it
+  lost the wombat and "Alpine marmot". Listed: mantis, lion (Buffon's
+  "Chien lion" lap dog), buzzard (Catesby's *Buteo … Gallinae Pavonis*, the
+  turkey vulture).
+- **Faint or blank downloads** (`_too_faint`): ink coverage of the subject box,
+  measured with the renderer's own `_prep_plate`/`_ink_mask`. Five blank scans
+  and pencil sketches in the sweep measured 0.2–3.3%, the faintest real plate
+  20%, so `FAINT_INK` = 5%. A faint pick falls to the next file in the pool
+  (up to `FAINT_RETRIES` downloads), then to the next collection.
+- **Each pick is logged** (`animal for <day>: <common> via <coll>: <file>`)
+  so the next "that was a bad one" can be traced without a replay.
+- **Dutch anatomy tokens** IZ uses: kaak (jaw), snavel (beak), tanden,
+  hoorns, baarmoeder, geslachtsorganen, maag, darmen, hersenen.
+
+**Sweep** (old rules vs new over the next 227 days = every animal once,
+Commons responses shared): 64 picks change; all 227 still resolve. Among the
+old picks the new rules remove: a photo of financier Jay Gould (jay — the
+first Gould evidence regex, a bare `\bGould\b`, let him in; it now needs
+"John Gould", "(Gould)", "GouldBirds…" or Richter), a painting "Tom Roberts at
+Curlew Camp", "Longhorn Spanish cattle" (bustard), a hornbill beak
+(rhinoceros), Catesby's Carolina parakeet as the African grey, Audubon's
+meadowlark as lark and as starling, a "Nightingale letter", wildlife photos
+(penguin, oriole, lynx), a buffalo's genitals and the lap dog. Three ANIMALS
+terms had only ever matched anatomy or namesakes and were changed to the name
+the corpus files them under: lion `Panthera leo` → **Felis leo**, buffalo
+`Bubalus` → **Bos bubalis**, alligator `Alligator` → **Crocodilus lucius**.
+
+Not caught: composite sheets like the colugo's (title, description and
+categories all just name the species), and IZ pages that are mostly a
+newspaper clipping (the sweep's aye-aye and pangolin). The per-image veto is
+the answer.
+
+**Crop.** `ART_ZOOM` scaled a figure 15% past its fit and cropped the
+overflow around the ink centroid, on the claim that the overflow was paper.
+It wasn't: the subject box keeps only 3% padding, and on the lark the rock
+and plant outweigh the neck, so the whole overflow came off the top — with
+the head. The zoom is now capped so the ink span (`_ink_span`) plus the hero
+fade still fits, and the crop window is clamped so it never cuts ink. Most
+plates fill their subject box, so in practice the lean-in is now small.
+Tried and dropped: growing the subject box outward to follow thin parts (a
+beak tip just under the run threshold) — it followed IZ mount cards and
+pencil annotations and shrank those plates badly.
+
 ## 23. Only repeated fetch failures are reported (2026-10-16)
 
 Open-Meteo 503'd once on 2026-10-15 and was fine on the next fetch, but each
