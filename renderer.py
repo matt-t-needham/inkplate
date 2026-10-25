@@ -1,8 +1,8 @@
 """Render orchestration: screen → RGB frame → dithered frame → cached PNGs.
 
 Renders are cached on disk under DATA_DIR/render/ and only redone when forced
-(control pane "Render now") or when the cache is older than the refresh
-cadence. The device endpoint always serves the cached dithered PNG, so a
+(control pane "Render now") or when the cache predates the current wake slot
+(see slot_window). The device endpoint always serves the cached dithered PNG, so a
 device wake never waits on a render.
 
 Files written per render (atomically, tmp + replace):
@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import config
@@ -110,17 +111,47 @@ def render(force_new_version: bool = False) -> dict:
     return m
 
 
+def slot_window(now: datetime, minutes: int, anchor: str) -> tuple[datetime, datetime]:
+    """(start of the current wake slot, start of the next) for a naive local
+    `now`. Slots run every `minutes` from `anchor` ("HH:MM") and restart at
+    the anchor each day, so with a 150-minute cadence the last slot before
+    06:00 is 04:30 and the gap to 06:00 is short. Wall-clock arithmetic: on
+    a DST change day the slots after the change shift by the hour."""
+    hh, mm = (int(p) for p in anchor.split(":"))
+    day = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if day > now:
+        day -= timedelta(days=1)
+    step = timedelta(minutes=minutes)
+    start = day + ((now - day) // step) * step
+    return start, min(start + step, day + timedelta(days=1))
+
+
+def schedule(cfg: dict, now: float | None = None) -> tuple[float, float]:
+    """(current slot start, next slot start) as epoch seconds. A wake within
+    WAKE_GRACE_S before a slot counts as that slot (the device clock drifts)."""
+    now = time.time() if now is None else now
+    start, nxt = slot_window(datetime.fromtimestamp(now + config.WAKE_GRACE_S),
+                             cfg["refresh_minutes"], cfg["refresh_anchor"])
+    return start.timestamp(), nxt.timestamp()
+
+
+def sleep_seconds(cfg: dict, now: float | None = None) -> int:
+    """How long the device should sleep: to the next wake slot."""
+    now = time.time() if now is None else now
+    return max(1, round(schedule(cfg, now)[1] - now))
+
+
 def ensure_fresh() -> dict:
-    """Render if there is no cached frame, the screen changed, or the cache is
-    older than the refresh cadence. Returns current meta."""
+    """Render if there is no cached frame, the screen changed, or the cache
+    predates the current wake slot. Returns current meta."""
     cfg = state.load_config()
     m = meta()
-    ttl_s = cfg["refresh_minutes"] * 60
+    slot_start, _ = schedule(cfg)
     stale = (
         m is None
         or m.get("screen") != cfg["screen"]
         or m.get("rotation", 0) != cfg["rotation"]
-        or (time.time() - m.get("rendered_at", 0)) > ttl_s
+        or m.get("rendered_at", 0) < slot_start - config.WAKE_GRACE_S
         or not dithered_path().exists()
     )
     if stale:

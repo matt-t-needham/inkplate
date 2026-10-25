@@ -23,8 +23,11 @@ _lock = threading.Lock()
 ROTATIONS = (0, 90, 180, 270)
 
 DEFAULT_CONFIG = {
-    # How long the device deep-sleeps between refreshes.
+    # How long the device deep-sleeps between refreshes: wake slots every
+    # refresh_minutes from refresh_anchor (local "HH:MM"), restarting at the
+    # anchor each day (renderer.slot_window).
     "refresh_minutes": config.DEFAULT_REFRESH_MINUTES,
+    "refresh_anchor": config.DEFAULT_REFRESH_ANCHOR,
     # Which screen renderer produces the frame (key into screens.SCREENS).
     "screen": screens.DEFAULT_SCREEN,
     # How the panel is hung: degrees it is turned clockwise from its native
@@ -97,7 +100,23 @@ def load_config() -> dict:
         cfg["image_rotations"] = {}
     if cfg["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
         cfg["portrait_layout"] = screens.DEFAULT_PORTRAIT_LAYOUT
+    try:
+        cfg["refresh_anchor"] = parse_anchor(cfg["refresh_anchor"])
+    except ValueError:
+        log.warning("refresh_anchor %r is not HH:MM, falling back", cfg["refresh_anchor"])
+        cfg["refresh_anchor"] = config.DEFAULT_REFRESH_ANCHOR
     return cfg
+
+
+def parse_anchor(v) -> str:
+    """Validate a local "HH:MM" time; returns it zero-padded."""
+    try:
+        hh, mm = (int(p) for p in str(v).split(":"))
+    except ValueError:
+        raise ValueError("refresh_anchor must be HH:MM") from None
+    if not (0 <= hh < 24 and 0 <= mm < 60):
+        raise ValueError("refresh_anchor must be HH:MM")
+    return f"{hh:02d}:{mm:02d}"
 
 
 def save_config(cfg: dict) -> None:
@@ -111,6 +130,8 @@ def update_config(**changes) -> dict:
     if "refresh_minutes" in changes:
         v = int(changes["refresh_minutes"])
         cfg["refresh_minutes"] = max(config.MIN_REFRESH_MINUTES, min(config.MAX_REFRESH_MINUTES, v))
+    if "refresh_anchor" in changes:
+        cfg["refresh_anchor"] = parse_anchor(changes["refresh_anchor"])
     if "screen" in changes:
         if changes["screen"] not in screens.SCREENS:
             raise ValueError(f"unknown screen: {changes['screen']}")

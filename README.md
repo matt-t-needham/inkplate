@@ -100,7 +100,9 @@ docker logs apps-inkplate-1 -f
   top-right, a symmetric weather band under it and the snow report in one
   centred row along the bottom border; *stack*: weather and caption on top,
   engraving below — see `docs/layouts/`), refresh cadence (how often the panel
-  redraws — keeps the temperature current), animal cadence in days (default
+  redraws — keeps the temperature current; wakes are slotted from a daily
+  anchor, `refresh_anchor`, default 06:00, so the morning frame always lands
+  then), animal cadence in days (default
   daily), weather and snow locations, tethered mode. Applies
   live; the device picks up cadence changes at its next check-in.
 - **Device check-ins** — battery voltage, Wi-Fi signal, boot count, errors.

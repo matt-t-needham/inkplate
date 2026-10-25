@@ -26,6 +26,16 @@ DEFAULT_REFRESH_MINUTES = int(os.environ.get("INKPLATE_REFRESH_MINUTES", "60"))
 MIN_REFRESH_MINUTES = 1
 MAX_REFRESH_MINUTES = 24 * 60
 
+# Wake slots run every refresh_minutes from this local time (container TZ)
+# and restart at it each day, so it always gets a refresh even when the
+# cadence doesn't divide 24h — the morning frame (new animal, today's
+# forecast) lands at this time.
+DEFAULT_REFRESH_ANCHOR = os.environ.get("INKPLATE_REFRESH_ANCHOR", "06:00")
+# The device's RTC drifts, so a wake this close before a slot counts as that
+# slot: it renders the slot's frame and sleeps to the one after, instead of
+# waking again minutes later.
+WAKE_GRACE_S = 600
+
 # Tethered mode: device skips deep sleep and polls fast (bring-up/debugging).
 DEFAULT_TETHERED_POLL_SECONDS = int(os.environ.get("INKPLATE_TETHERED_POLL_SECONDS", "15"))
 

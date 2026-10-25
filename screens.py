@@ -169,10 +169,12 @@ SCENE_INK_COVERAGE = 0.50
 ART_BLEED = 0.075
 ART_FADE_LEFT = 300
 ART_FADE_EDGE = 120
-# A contained figure is scaled past its fit by this much and the overflow
-# cropped around its ink centroid: the subject box keeps a margin of paper
-# and a fit-to-box plate still floats in white, so lean in. The overflow is
-# at most 1 - 1/ART_ZOOM of the long axis, which the edge fades swallow.
+# A contained figure is scaled past its fit by up to this much and the
+# overflow cropped: the subject box keeps a margin of paper and a fit-to-box
+# plate still floats in white, so lean in — but only as far as that paper
+# goes. The crop never cuts ink: a figure whose ink fills its box is drawn
+# at fit (cutting around the ink centroid took the lark's head off, because
+# its rock and plant outweigh its neck and beak).
 ART_ZOOM = 1.15
 
 
@@ -268,8 +270,10 @@ def _subject_box(img: Image.Image, pad: float = 0.03):
             min(W, int((x1 + 1) * sx + px)), min(H, int((y1 + 1) * sy + py)))
 
 
-def _prep_engraving(art: Image.Image) -> tuple[Image.Image, bool]:
-    """Trim, crop to the subject, clean the paper. Returns (image, is_scene)."""
+def _prep_plate(art: Image.Image):
+    """Trim and clean the whole sheet, and find the subject on it. Returns
+    (sheet, subject_box, is_scene): the sheet keeps the paper around the
+    subject, so a layout with room to spare can show some of it."""
     art = _trim_borders(art)
 
     mask, size = _ink_mask(art)
@@ -278,11 +282,18 @@ def _prep_engraving(art: Image.Image) -> tuple[Image.Image, bool]:
 
     box = _subject_box(art)
     W, H = art.size
-    if (box[2] - box[0]) * (box[3] - box[1]) >= 0.02 * W * H:
-        art = art.crop(box)   # guard only against a degenerate sliver
+    if (box[2] - box[0]) * (box[3] - box[1]) < 0.02 * W * H:
+        box = (0, 0, W, H)   # guard only against a degenerate sliver
 
-    wp = max(180, min(240, _paper_tone(art.convert("L")) - 5))
-    return art.point(lambda v: 255 if v >= wp else int(v * 255 / wp)), is_scene
+    # White point from the subject, not the sheet: its margins are paper.
+    wp = max(180, min(240, _paper_tone(art.crop(box).convert("L")) - 5))
+    return art.point(lambda v: 255 if v >= wp else int(v * 255 / wp)), box, is_scene
+
+
+def _prep_engraving(art: Image.Image) -> tuple[Image.Image, bool]:
+    """Trim, crop to the subject, clean the paper. Returns (image, is_scene)."""
+    sheet, box, is_scene = _prep_plate(art)
+    return sheet.crop(box), is_scene
 
 
 def _c_to_f(c: float) -> int:
@@ -390,9 +401,14 @@ PORTRAIT_CAPTION_TOP = 196
 # or, with snow off, on the bottom margin; everything above, inside
 # HERO_MARGIN, is the art section. Centred art has no edge to bleed off, so
 # it gets only a soft HERO_FADE on every side — enough to hide the crop
-# line, not a dissolve.
+# line, not a dissolve. The subject crop is tight (a beak or a tail tip can
+# sit on it), so wherever the box has room the plate is drawn HERO_CONTEXT
+# further out and the fade lands on that paper margin; only where the box
+# itself stops it — the frame margin, the weather band — does the fade
+# fall on the drawing.
 HERO_MARGIN = 40
 HERO_FADE = 36
+HERO_CONTEXT = 80
 HERO_WEATHER_H = 340       # centred temperature row + forecast / rise-set row
 HERO_SNOW_H = 118          # location label over one row of figures
 HERO_BAND_HALF = 360       # the forecast and rise/set blocks hug ±this of centre
@@ -547,13 +563,28 @@ def _ink_centroid(art: Image.Image) -> tuple[float, float]:
     return (sx / n + 0.5) * art.width / sw, (sy / n + 0.5) * art.height / sh
 
 
+def _ink_span(art: Image.Image) -> tuple[float, float, float, float]:
+    """Where the ink starts and stops on each axis of a subject crop, in its
+    own pixels: the part a lean-in crop must never cut."""
+    mask, (sw, sh) = _ink_mask(art)
+    cols, rows = _profiles(mask, (sw, sh))
+
+    def span(prof):
+        idx = [i for i, v in enumerate(prof) if v]
+        return (idx[0], idx[-1] + 1) if idx else (0, len(prof))
+    (x0, x1), (y0, y1) = span(cols), span(rows)
+    return (x0 * art.width / sw, y0 * art.height / sh,
+            x1 * art.width / sw, y1 * art.height / sh)
+
+
 def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
               mode: str = "bleed"):
     """The engraving, fitted into a fixed art box (x0, y0, x1, y1) in frame
     pixels. The box is defined in panel coordinates, not derived from the
     image, so every plate lands in the same place whatever its dimensions.
-    A figure is contained, then leaned into by ART_ZOOM (the overflow is
-    paper margin, cut around the ink centroid); a scene covers the box.
+    A figure is contained, then leaned into by up to ART_ZOOM where its
+    subject box has paper to spare (the overflow is cut around the ink
+    centroid, never through ink); a scene covers the box.
     `animal["rotation"]` (clockwise degrees, from config) turns a plate
     that was scanned sideways before anything else looks at it.
 
@@ -561,8 +592,10 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     the last ART_BLEED running off the frame, long fades on the left and
     the top/bottom edges so text can sit over it.
     mode "centered" (hero): the plate's ink centroid is put on the box's
-    centre (clamped so nothing leaves the box), with only a soft HERO_FADE
-    on every side — nothing overlaps it except its own caption.
+    centre (clamped so nothing leaves the box) and drawn with up to
+    HERO_CONTEXT of paper around it, so the soft HERO_FADE falls on that
+    margin rather than the subject wherever the box has room — nothing
+    overlaps it except its own caption.
     Returns the pasted rectangle, or None if nothing was drawn."""
     if not animal:
         return None
@@ -577,34 +610,51 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     rot = int(animal.get("rotation") or 0) % 360
     if rot:
         plate = plate.rotate(-rot, expand=True)
-    art, is_scene = _prep_engraving(plate)
-    fit = max if is_scene else min
-    scale = fit(bw / art.width, bh / art.height)
-    if not is_scene:
-        scale *= ART_ZOOM
+    sheet, sb, is_scene = _prep_plate(plate)
+    art = sheet.crop(sb)
+    if is_scene:
+        scale = max(bw / art.width, bh / art.height)
+    else:
+        scale = min(bw / art.width, bh / art.height)
+        # Keep the hero's soft edge on paper too, not on the drawing.
+        ix = X(HERO_FADE) if mode == "centered" else 0
+        iy = Y(HERO_FADE) if mode == "centered" else 0
+        ink = _ink_span(art)
+        scale = max(scale, min(scale * ART_ZOOM,
+                               (bw - 2 * ix) / (ink[2] - ink[0]),
+                               (bh - 2 * iy) / (ink[3] - ink[1])))
     art = art.resize((max(1, round(art.width * scale)),
                       max(1, round(art.height * scale))), Image.LANCZOS)
     if art.width > bw or art.height > bh:
-        # Trim the overflow: a scene around its centre, a zoomed figure
-        # around its ink centroid so the body stays and the margin goes.
+        # Trim the overflow: a scene around its centre; a zoomed figure
+        # around its ink centroid, but only ever through paper — the window
+        # is clamped so the ink span stays whole.
         if is_scene:
             cx, cy = art.width / 2, art.height / 2
+            lo_x = lo_y = 0
+            hi_x, hi_y = art.width - bw, art.height - bh
         else:
             cx, cy = _ink_centroid(art)
-        ox = max(0, min(art.width - bw, round(cx - bw / 2)))
-        oy = max(0, min(art.height - bh, round(cy - bh / 2)))
+            ix0, iy0, ix1, iy1 = (v * scale for v in ink)
+            lo_x, hi_x = max(0, ix1 + ix - bw), min(art.width - bw, ix0 - ix)
+            lo_y, hi_y = max(0, iy1 + iy - bh), min(art.height - bh, iy0 - iy)
+        ox = round(max(lo_x, min(hi_x, cx - bw / 2))) if art.width > bw else 0
+        oy = round(max(lo_y, min(hi_y, cy - bh / 2))) if art.height > bh else 0
         art = art.crop((ox, oy, ox + min(bw, art.width), oy + min(bh, art.height)))
+    else:
+        ox = oy = 0
     # Fade widths are fixed on the panel, not a share of the image —
     # otherwise a small plate fades over a few pixels and a large one
     # over hundreds, which is what made the peacock dissolve early.
     if mode == "centered":
-        fx, fy = min(0.45, X(HERO_FADE) / art.width), min(0.45, Y(HERO_FADE) / art.height)
-        mask = _edge_fade_mask(art.width, art.height, left=fx, right=fx, top=fy, bottom=fy)
         cx, cy = _ink_centroid(art)
         x = round(bx0 + bw / 2 - cx)
         y = round(by0 + bh / 2 - cy)
         x = max(bx0, min(bx1 - art.width, x))
         y = max(by0, min(by1 - art.height, y))
+        art, x, y = _with_context(sheet, sb, scale, (x - ox, y - oy), box, X, Y)
+        fx, fy = min(0.45, X(HERO_FADE) / art.width), min(0.45, Y(HERO_FADE) / art.height)
+        mask = _edge_fade_mask(art.width, art.height, left=fx, right=fx, top=fy, bottom=fy)
     else:
         edge = min(0.45, Y(ART_FADE_EDGE) / art.height)
         mask = _edge_fade_mask(
@@ -615,6 +665,24 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
         y = by0 + (bh - art.height) // 2
     img.paste(art, (x, y), mask)
     return (x, y, x + art.width, y + art.height)
+
+
+def _with_context(sheet: Image.Image, sb, scale: float, origin, box, X, Y):
+    """The subject plus up to HERO_CONTEXT of the sheet around it, clipped to
+    the art box. `origin` is where the scaled subject box's top-left lands in
+    the frame. Returns (image, x, y)."""
+    ex, ey = X(HERO_CONTEXT) / scale, Y(HERO_CONTEXT) / scale   # in sheet px
+    sx0 = max(0.0, sb[0] - ex, sb[0] + (box[0] - origin[0]) / scale)
+    sy0 = max(0.0, sb[1] - ey, sb[1] + (box[1] - origin[1]) / scale)
+    sx1 = min(sheet.width, sb[2] + ex, sb[0] + (box[2] - origin[0]) / scale)
+    sy1 = min(sheet.height, sb[3] + ey, sb[1] + (box[3] - origin[1]) / scale)
+    x = max(box[0], round(origin[0] + (sx0 - sb[0]) * scale))
+    y = max(box[1], round(origin[1] + (sy0 - sb[1]) * scale))
+    w = min(box[2], round(origin[0] + (sx1 - sb[0]) * scale)) - x
+    h = min(box[3], round(origin[1] + (sy1 - sb[1]) * scale)) - y
+    art = sheet.resize((max(1, w), max(1, h)), Image.LANCZOS,
+                       box=(sx0, sy0, sx1, sy1))
+    return art, x, y
 
 
 def _overlaps(a, b) -> bool:
