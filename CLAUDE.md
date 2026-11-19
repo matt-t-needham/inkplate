@@ -71,4 +71,4 @@ docker build --target test .                        # what the deploy gate runs
 ## Deployment
 
 Port 3008: inkplate — binds 0.0.0.0 so the e-paper device can reach it over
-the LAN; also tunnelled as inkplate.bix.computer behind Cloudflare Access.
+the LAN (an exception to the suite's bind-narrowly rule); also tunnelled as inkplate.bix.computer behind Cloudflare Access.
