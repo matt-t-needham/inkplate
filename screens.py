@@ -19,6 +19,7 @@ Screens:
 import logging
 import math
 from datetime import date, datetime
+from typing import NamedTuple
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -426,8 +427,9 @@ CAPTION_FADE_FEATHER = 28
 def with_image_settings(animal: dict | None, cfg: dict) -> dict | None:
     """The animal dict plus its per-image settings from config, keyed by the
     Commons file: "rotation" (clockwise degrees, for plates scanned
-    sideways) and "placement" (the pane's move/scale, see PLACEMENT). The
-    cached dict is left untouched."""
+    sideways) and "placement" (the pane's move/scale, see
+    normalize_placement; None is the automatic fit). The cached dict is left
+    untouched."""
     if not animal:
         return animal
     f = animal.get("file")
@@ -436,12 +438,12 @@ def with_image_settings(animal: dict | None, cfg: dict) -> dict | None:
             "placement": (cfg.get("image_placements") or {}).get(f)}
 
 
-# Per-image placement: the pane's Adjust control moves and scales a print
+# Per-image placement: the pane's Adjust control moves and scales an image
 # inside its art box, after the automatic trim/crop/fit has placed it. x and
 # y shift the subject's centre by that share of the box's width and height;
 # scale multiplies the automatic scale. Stored values are kept inside these
-# limits, and _draw_art also keeps the subject's centre inside the box, so a
-# print can never be pushed or shrunk out of its own area.
+# limits, and _draw_art also keeps the subject's centre inside the box, so an
+# image can never be pushed or shrunk out of its own area.
 PLACEMENT_SHIFT = 1.0
 PLACEMENT_SCALE = (0.5, 2.5)
 DEFAULT_PLACEMENT = {"x": 0.0, "y": 0.0, "scale": 1.0}
@@ -468,6 +470,13 @@ def normalize_placement(p) -> dict | None:
     return None if out == DEFAULT_PLACEMENT else out
 
 
+def kept_images(cfg: dict) -> set[str]:
+    """Commons files the user has reviewed or adjusted: a prefetched one is
+    what hangs on its day (DECISIONS §25)."""
+    return (set(cfg.get("reviewed_images") or []) | set(cfg.get("image_placements") or {})
+            | set(cfg.get("image_rotations") or {}))
+
+
 def _dashboard_data(cfg: dict) -> dict:
     """Every source the dashboard draws from, each independently optional."""
     return {
@@ -475,7 +484,8 @@ def _dashboard_data(cfg: dict) -> dict:
         "animal": with_image_settings(
             datasources.get_animal(offset=cfg["animal_offset"],
                                    period_days=cfg["animal_period_days"],
-                                   vetoed=cfg["vetoed_images"]),
+                                   vetoed=cfg["vetoed_images"],
+                                   keep=kept_images(cfg)),
             cfg),
         "snow": (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
                  if cfg["show_snow"] else None),
@@ -515,13 +525,13 @@ def _hero_rows(height: int, Y, snow: bool) -> tuple[int, int]:
     return bottom, band_top
 
 
-def art_box(width: int, height: int, cfg: dict, snow: bool):
-    """Where the dashboard draws the print, for this frame size, layout and
-    snow row: ((x0, y0, x1, y1), mode) for _draw_art. The one definition the
-    layouts and the pane's placement preview share."""
+def art_box(width: int, height: int, layout: str | None, snow: bool):
+    """Where the dashboard draws the art, for this frame size, portrait
+    layout (ignored in landscape) and snow row: ((x0, y0, x1, y1), mode) for
+    _draw_art. The one definition the layouts and the pane's placement
+    preview share."""
     if height > width:
         X, Y = _scalers(width, height, PORTRAIT)
-        layout = cfg.get("portrait_layout")
         layout = layout if layout in PORTRAIT_LAYOUTS else DEFAULT_PORTRAIT_LAYOUT
         if layout == "hero":
             _, band_top = _hero_rows(height, Y, snow)
@@ -536,17 +546,17 @@ def art_box(width: int, height: int, cfg: dict, snow: bool):
 
 
 def art_preview(animal: dict, cfg: dict, size: tuple[int, int]):
-    """The print alone, drawn exactly as the dashboard draws it (same box,
+    """The art alone, drawn exactly as the dashboard draws it (same box,
     mode, crop, fades and placement) on a white frame of `size`, cropped to
-    its art box. Returns (image, effective placement): the placement after
-    _draw_art has clamped it to the box."""
+    its art box. Returns (image, placement as drawn after clamping to the
+    box, None for the automatic fit)."""
     width, height = size
     X, Y = _scalers(width, height, PORTRAIT if height > width else LANDSCAPE)
-    box, mode = art_box(width, height, cfg, bool(cfg.get("show_snow")))
+    box, mode = art_box(width, height, cfg.get("portrait_layout"),
+                        bool(cfg.get("show_snow")))
     img = Image.new("RGB", (width, height), WHITE)
-    placed: dict = {}
-    _draw_art(img, animal, box, X, Y, mode=mode, placed=placed)
-    return img.crop(box), placed.get("placement", dict(DEFAULT_PLACEMENT))
+    art = _draw_art(img, animal, box, X, Y, mode=mode)
+    return img.crop(box), art.placement if art else None
 
 
 def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict) -> Image.Image:
@@ -554,8 +564,7 @@ def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict) -> Imag
     X, Y = _scalers(width, height, LANDSCAPE)
     halo = dict(stroke_width=max(2, Y(4)), stroke_fill=WHITE)   # text over art
 
-    # Fixed art box in panel coordinates (see _draw_art, art_box).
-    box, mode = art_box(width, height, cfg, bool(data["snow"]))
+    box, mode = art_box(width, height, None, bool(data["snow"]))
     drew_art = _draw_art(img, data["animal"], box, X, Y, mode=mode)
 
     d = ImageDraw.Draw(img)
@@ -580,12 +589,10 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
     right = width - X(48)
 
     if layout == "hero":
-        # Build upwards from the bottom border: snow row (optional), weather
-        # band, then the art takes whatever is left above.
         bottom, band_top = _hero_rows(height, Y, bool(data["snow"]))
-        box, mode = art_box(width, height, {**cfg, "portrait_layout": layout},
-                            bool(data["snow"]))
-        art_rect = _draw_art(img, data["animal"], box, X, Y, mode=mode)
+        box, mode = art_box(width, height, layout, bool(data["snow"]))
+        art = _draw_art(img, data["animal"], box, X, Y, mode=mode)
+        art_rect = art.rect if art else None
         d = ImageDraw.Draw(img)
         # Anything laid over the art is measured first (drawn into a 1px
         # scratch) so the art can be lightened under it before it is drawn.
@@ -611,8 +618,7 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
         return img
 
     # stack: the landscape arrangement folded — info on top, art below.
-    box, mode = art_box(width, height, {**cfg, "portrait_layout": layout},
-                        bool(data["snow"]))
+    box, mode = art_box(width, height, layout, bool(data["snow"]))
     drew_art = _draw_art(img, data["animal"], box, X, Y, mode=mode)
     d = ImageDraw.Draw(img)
     _draw_caption(d, data["animal"] if drew_art else None, right,
@@ -658,8 +664,13 @@ def _ink_span(art: Image.Image) -> tuple[float, float, float, float]:
             x1 * art.width / sw, y1 * art.height / sh)
 
 
+class Art(NamedTuple):
+    rect: tuple[int, int, int, int]   # where the art was pasted, frame px
+    placement: dict | None            # as drawn, after clamping; None = automatic
+
+
 def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
-              mode: str = "bleed", placed: dict | None = None):
+              mode: str = "bleed") -> Art | None:
     """The engraving, fitted into a fixed art box (x0, y0, x1, y1) in frame
     pixels. The box is defined in panel coordinates, not derived from the
     image, so every plate lands in the same place whatever its dimensions.
@@ -670,8 +681,7 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     that was scanned sideways before anything else looks at it.
     `animal["placement"]` (the pane's Adjust, see PLACEMENT_SHIFT) then
     moves and scales the result inside the box; None draws it exactly as
-    the automatic fit does. If `placed` is given, the placement actually
-    drawn (after clamping to the box) is written to placed["placement"].
+    the automatic fit does.
 
     mode "bleed" (landscape, stack): anchored to the box's right edge with
     the last ART_BLEED running off the frame, long fades on the left and
@@ -681,7 +691,8 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     HERO_CONTEXT of paper around it, so the soft HERO_FADE falls on that
     margin rather than the subject wherever the box has room — nothing
     overlaps it except its own caption.
-    Returns the pasted rectangle, or None if nothing was drawn."""
+    Returns the pasted rectangle and the placement drawn, or None if nothing
+    was drawn."""
     if not animal:
         return None
     try:
@@ -745,13 +756,11 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
         x = bx1 - round(art.width * (1 - ART_BLEED))
         y = by0 + (bh - art.height) // 2
         origin = (x - ox, y - oy)
-    drawn = dict(DEFAULT_PLACEMENT)
+    drawn = None
     if placement:
         art, x, y, drawn = _place(sheet, sb, scale, origin, box, placement, mode, X, Y)
-    if placed is not None:
-        placed["placement"] = drawn
     img.paste(art, (x, y), _art_mask(art, x, box, mode, X, Y))
-    return (x, y, x + art.width, y + art.height)
+    return Art((x, y, x + art.width, y + art.height), drawn)
 
 
 def _art_mask(art: Image.Image, x: int, box, mode: str, X, Y) -> Image.Image:
@@ -775,8 +784,7 @@ def _place(sheet: Image.Image, sb, scale: float, origin, box, placement: dict,
            mode: str, X, Y):
     """Apply a saved placement to art the automatic fit put at `origin`
     (where the scaled subject box's top-left lands) and `scale`: scale about
-    the subject's centre, then shift it by a share of the box. The centre is
-    kept inside the box, so the print can't leave its own area. The pixels
+    the subject's centre, then shift it by a share of the box. The pixels
     are resampled from the sheet, not from the fitted bitmap, so a zoom
     stays sharp. Returns (image, x, y, placement as drawn)."""
     bx0, by0, bx1, by1 = box

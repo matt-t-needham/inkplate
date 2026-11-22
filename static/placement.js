@@ -1,12 +1,13 @@
-// Adjust control: move and scale one print inside its art box, saved per
+// Adjust control: move and scale one image inside its art box, saved per
 // image. Shared by the pane (index.html) and the review page (review.html).
 //
-// The picture is always the server's: api/print-preview.png draws the print
+// The picture is always the server's: api/animal-preview.png draws the image
 // through the dashboard's own code at the panel's size and layout. While a
 // drag is in progress the last preview is nudged with a CSS transform so the
 // hand has something to follow; on release the server redraws it, and the
-// placement it reports back (X-Placement, clamped to the box) becomes the
-// draft. All URLs are relative: the pages are also served under a prefix.
+// placement it reports back (X-Placement, clamped to the box; null for the
+// automatic fit) becomes the draft. All URLs are relative: the pages are
+// also served under a prefix.
 (function () {
   const DEFAULT = {x: 0, y: 0, scale: 1};
   const NUDGE = 0.01;   // arrow keys move by 1% of the box
@@ -58,7 +59,8 @@
   }
 
   // mount(el, {file, placement, onSaved}) → {reload(), destroy()}
-  // onSaved(print) gets the server's summary of the print after a save.
+  // placement null means the automatic fit. onSaved(animal) gets the
+  // server's summary of the image after a save.
   function mount(el, opts) {
     const file = opts.file;
     let saved = {...DEFAULT, ...(opts.placement || {})};
@@ -113,12 +115,12 @@
       const q = new URLSearchParams({file, x: draft.x, y: draft.y, scale: draft.scale,
                                      t: Date.now()});
       try {
-        const r = await fetch('api/print-preview.png?' + q);
+        const r = await fetch('api/animal-preview.png?' + q);
         if (!r.ok) {
           const j = await r.json().catch(() => ({}));
           throw new Error(j.detail || ('HTTP ' + r.status));
         }
-        const placed = JSON.parse(r.headers.get('X-Placement') || 'null');
+        const placed = JSON.parse(r.headers.get('X-Placement') || 'null') || DEFAULT;
         const blob = await r.blob();
         if (mine !== seq) return;
         if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -130,7 +132,7 @@
         });
         stage.style.aspectRatio = img.naturalWidth + ' / ' + img.naturalHeight;
         img.style.transform = '';
-        if (placed) draft = {...draft, x: placed.x, y: placed.y};
+        draft = {...draft, x: placed.x, y: placed.y};
         sync();
       } catch (e) {
         if (mine === seq) say('Preview failed: ' + e.message, true);
@@ -192,11 +194,11 @@
         const body = same(draft, DEFAULT) ? {file, reset: true}
                                           : {file, x: draft.x, y: draft.y, scale: draft.scale};
         const j = await postJSON('api/placement', body);
-        saved = {...DEFAULT, ...(j.print && j.print.placement)};
+        saved = {...DEFAULT, ...j.animal.placement};
         draft = {...saved};
         sync();
         say('Saved');
-        if (opts.onSaved) opts.onSaved(j.print, j);
+        if (opts.onSaved) opts.onSaved(j.animal);
       } catch (e) {
         say('Save failed: ' + e.message, true);
         saveBtn.disabled = false;
@@ -207,10 +209,10 @@
     say('');
     render();
     return {
-      reload: render,   // e.g. after the print was rotated
+      reload: render,   // e.g. after the image was rotated
       destroy() { seq++; if (objectUrl) URL.revokeObjectURL(objectUrl); el.innerHTML = ''; },
     };
   }
 
-  window.Placement = {mount, postJSON, DEFAULT, same};
+  window.Placement = {mount, postJSON};
 })();

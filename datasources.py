@@ -15,6 +15,7 @@ Tests monkeypatch `_get_json` / `_get_bytes` — nothing here should be hit by
 the offline suite or the Docker build's test stage.
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -767,11 +768,11 @@ def cached_animal() -> dict | None:
 
 
 def _resolve(slot: int, vetoed, img_path: Path) -> dict | None:
-    """The print for a content slot: the slot's animal, tried across its
-    eligible collections in the slot's rotation until one has a usable plate,
-    whose image is saved to `img_path`. The one selection rule — the panel
-    (get_animal) and the review page's lookahead (upcoming_animals) both
-    call it, so the review list is what will actually hang."""
+    """The animal for a content slot, tried across its eligible collections
+    in the slot's rotation until one has a usable plate, whose image is
+    saved to `img_path`. The one selection rule — the panel (get_animal) and
+    the review page (upcoming_animals) both call it, so the review list is
+    what will actually hang."""
     common, latin, native, kind = ANIMALS[slot % len(ANIMALS)]
     eligible = [c for c in COLLECTIONS
                 if (c["kinds"] is None or kind in c["kinds"])
@@ -790,7 +791,7 @@ def _resolve(slot: int, vetoed, img_path: Path) -> dict | None:
 
 
 def get_animal(day: date | None = None, offset: int = 0,
-               period_days: int = 1, vetoed=()) -> dict | None:
+               period_days: int = 1, vetoed=(), keep=()) -> dict | None:
     """The current engraving, as a data dict for the caption: common/sci name,
     year, artist + artist's place (collection defaults when the file is
     silent), the animal's native range.
@@ -801,8 +802,9 @@ def get_animal(day: date | None = None, offset: int = 0,
     changes (1 = daily); `offset` advances the sequence — the pane's "next
     animal" button. `vetoed` holds Commons file titles: a vetoed image is
     never picked again, and the same animal is drawn from its next plate.
-    A slot the review page has already looked ahead to takes that print, so
-    what was reviewed is what hangs even if Commons has changed since.
+    `keep` holds Commons file titles the user has reviewed or adjusted: a
+    slot the review page fetched ahead takes that image if it is one of
+    them, so what was reviewed is what hangs even if Commons has changed.
     """
     day = day or date.today()
     slot = slot_for(day, period_days, offset)
@@ -816,7 +818,7 @@ def get_animal(day: date | None = None, offset: int = 0,
             and (_cache_dir() / ANIMAL_IMG).exists()):
         return meta["data"]
 
-    data = _adopt_lookahead(slot, vetoed) or _resolve(slot, vetoed, _cache_dir() / ANIMAL_IMG)
+    data = _take_prefetched(slot, vetoed, set(keep)) or _resolve(slot, vetoed, _cache_dir() / ANIMAL_IMG)
     if data:
         data["for_date"] = day.isoformat()
         _cache_write("animal.json", {"fetched_at": time.time(), "data": data})
@@ -837,35 +839,42 @@ def get_animal(day: date | None = None, offset: int = 0,
     return None
 
 
-# ── lookahead (the review page) ───────────────────────────────────────────────
-# Upcoming slots are resolved ahead of time into cache/prints/<slot>.json +
+# ── upcoming animals (the review page) ───────────────────────────────────────
+# Upcoming slots are resolved ahead of time into cache/upcoming/<slot>.json +
 # <slot>.jpg, beside — never over — the panel's own animal.json/animal.jpg.
-# A slot that found nothing is retried after LOOKAHEAD_RETRY_S rather than on
-# every page load, so a dead upstream isn't hammered by the review page.
-LOOKAHEAD_RETRY_S = 6 * 3600
-_lookahead_lock = threading.Lock()
+UPCOMING_RETRY_S = 6 * 3600
+_upcoming_lock = threading.Lock()
 
 
-def _prints_dir() -> Path:
-    d = _cache_dir() / "prints"
+def _upcoming_dir() -> Path:
+    d = _cache_dir() / "upcoming"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _lookahead_entry(slot: int, vetoed) -> dict | None:
-    """The stored lookahead print for a slot, if it is still usable."""
-    meta = _cache_read(f"prints/{slot}.json")
+def _stored_upcoming(slot: int, vetoed) -> dict | None:
+    """The stored upcoming animal for a slot, if it is still usable."""
+    meta = _cache_read(f"upcoming/{slot}.json")
     d = meta.get("data") if meta else None
     if d and d.get("file") not in vetoed and Path(d.get("path", "")).exists():
         return d
     return None
 
 
-def _adopt_lookahead(slot: int, vetoed) -> dict | None:
-    """The slot's looked-ahead print, copied into the panel's own cache
-    files; None if the slot was never looked ahead to."""
-    d = _lookahead_entry(slot, vetoed)
-    if not d:
+def _gave_up_recently(slot: int) -> bool:
+    meta = _cache_read(f"upcoming/{slot}.json")
+    return bool(meta and meta.get("data") is None
+                and time.time() - meta.get("fetched_at", 0) < UPCOMING_RETRY_S)
+
+
+def _take_prefetched(slot: int, vetoed, keep) -> dict | None:
+    """The slot's prefetched animal, copied into the panel's own cache files —
+    only when the user reviewed or adjusted that image (its file is in
+    `keep`) and the slot still maps to that animal. None otherwise, and the
+    slot is resolved afresh, so later selection fixes still apply."""
+    d = _stored_upcoming(slot, vetoed)
+    if (not d or d.get("file") not in keep
+            or d.get("common_name") != ANIMALS[slot % len(ANIMALS)][0]):
         return None
     dest = _cache_dir() / ANIMAL_IMG
     tmp = dest.with_name(dest.name + ".tmp")
@@ -873,36 +882,37 @@ def _adopt_lookahead(slot: int, vetoed) -> dict | None:
         tmp.write_bytes(Path(d["path"]).read_bytes())
         os.replace(tmp, dest)
     except OSError as e:
-        log.warning("could not adopt the looked-ahead print for slot %d, "
+        log.warning("could not take the prefetched animal for slot %d, "
                     "fetching afresh: %s", slot, e)
         return None
     return {**d, "path": str(dest)}
 
 
-def _lookahead(slot: int, vetoed) -> dict | None:
-    d = _lookahead_entry(slot, vetoed)
-    if d:
+def _fetch_upcoming(slot: int, vetoed) -> dict | None:
+    """The slot's upcoming animal, resolved and stored on first sight; a slot
+    that found nothing is retried only after UPCOMING_RETRY_S, so a dead
+    upstream isn't hammered by the review page."""
+    d = _stored_upcoming(slot, vetoed)
+    if d or _gave_up_recently(slot):
         return d
-    meta = _cache_read(f"prints/{slot}.json")
-    if (meta and meta.get("data") is None
-            and time.time() - meta.get("fetched_at", 0) < LOOKAHEAD_RETRY_S):
-        return None
-    d = _resolve(slot, vetoed, _prints_dir() / f"{slot}.jpg")
-    _cache_write(f"prints/{slot}.json", {"fetched_at": time.time(), "data": d})
+    d = _resolve(slot, vetoed, _upcoming_dir() / f"{slot}.jpg")
+    _cache_write(f"upcoming/{slot}.json", {"fetched_at": time.time(), "data": d})
     if d is None:
-        log.warning("no print found ahead for slot %d (%s) in any collection",
+        log.warning("no upcoming animal found for slot %d (%s) in any collection",
                     slot, ANIMALS[slot % len(ANIMALS)][0])
     return d
 
 
-def upcoming_animals(start: date, days: int, offset: int = 0,
-                     period_days: int = 1, vetoed=()) -> list[dict]:
-    """The prints the panel will show from `start` for `days` days, in order:
-    one {"slot", "dates", "animal"} per content slot ("animal" is None when
-    no collection has a usable plate). Same slots (slot_for) and same
-    selection (_resolve) as get_animal; the slot on the panel now is read
-    from its cache rather than looked up again. Network-bound on first
-    sight of a slot — call it off the event loop."""
+def upcoming_animals(start: date, days: int, offset: int = 0, period_days: int = 1,
+                     vetoed=(), fetch: bool = True) -> list[dict]:
+    """The animals the panel will show from `start` for `days` days, in order:
+    one {"slot", "dates", "animal", "pending"} per content slot ("animal" is
+    None when no collection has a usable plate). Same slots (slot_for) and
+    same selection (_resolve) as get_animal; the slot on the panel now is
+    read from its cache rather than looked up again. With `fetch`, slots not
+    yet resolved are fetched one at a time (network-bound — call it off the
+    event loop); without, they come back None with "pending": True and
+    nothing touches the network."""
     vetoed = set(vetoed)
     slots: dict[int, list[str]] = {}
     for i in range(max(0, days)):
@@ -910,23 +920,26 @@ def upcoming_animals(start: date, days: int, offset: int = 0,
         slots.setdefault(slot_for(d, period_days, offset), []).append(d.isoformat())
     current = cached_animal()
     out = []
-    with _lookahead_lock:
+    with _upcoming_lock if fetch else contextlib.nullcontext():
         for slot, dates in slots.items():
+            pending = False
             if (current and current.get("slot") == slot and current.get("file")
                     and current["file"] not in vetoed
                     and (_cache_dir() / ANIMAL_IMG).exists()):
                 animal = current
+            elif fetch:
+                animal = _fetch_upcoming(slot, vetoed)
             else:
-                animal = _lookahead(slot, vetoed)
-            out.append({"slot": slot, "dates": dates, "animal": animal})
-        if slots:
-            _prune_lookahead(min(slots))
+                animal = _stored_upcoming(slot, vetoed)
+                pending = animal is None and not _gave_up_recently(slot)
+            out.append({"slot": slot, "dates": dates, "animal": animal, "pending": pending})
+        if fetch and slots:
+            _prune_upcoming(min(slots))
     return out
 
 
-def _prune_lookahead(before: int) -> None:
-    """Drop looked-ahead prints for slots that have passed."""
-    for p in _prints_dir().iterdir():
+def _prune_upcoming(before: int) -> None:
+    for p in _upcoming_dir().iterdir():
         try:
             slot = int(p.name.split(".")[0])
         except ValueError:
@@ -935,17 +948,17 @@ def _prune_lookahead(before: int) -> None:
             try:
                 p.unlink()
             except OSError as e:
-                log.warning("could not prune lookahead file %s: %s", p.name, e)
+                log.warning("could not prune upcoming file %s: %s", p.name, e)
 
 
-def find_print(file: str) -> dict | None:
-    """A print the panel shows now or the review page has looked ahead to,
+def find_animal(file: str) -> dict | None:
+    """An animal the panel shows now or the review page has fetched ahead,
     by Commons file title — the image keys the pane may adjust."""
     current = cached_animal()
     if current and current.get("file") == file and Path(current.get("path", "")).exists():
         return current
-    for p in sorted(_prints_dir().glob("*.json")):
-        d = _cache_read(f"prints/{p.name}")
+    for p in sorted(_upcoming_dir().glob("*.json")):
+        d = _cache_read(f"upcoming/{p.name}")
         d = d.get("data") if d else None
         if d and d.get("file") == file and Path(d.get("path", "")).exists():
             return d

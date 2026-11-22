@@ -109,32 +109,29 @@ def _current(cfg: dict | None = None) -> dict:
     From the cache (no network on the 10 s poll)."""
     cfg = cfg or state.load_config()
     a = datasources.cached_animal()
-    return {"animal": _print_summary(a, cfg) if a else None}
+    return {"animal": _animal_summary(a, cfg) if a else None}
 
 
-def _print_summary(a: dict, cfg: dict) -> dict:
-    """What the pane and the review page show of one print, with its
-    per-image settings."""
-    f = a.get("file")
+def _animal_summary(a: dict, cfg: dict) -> dict:
+    """What the pane and the review page show of one animal, with its
+    per-image settings ("placement" None = the automatic fit)."""
+    a = screens.with_image_settings(a, cfg)
     return ({k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
-                                   "collection", "file")}
-            | {"rotation": (cfg.get("image_rotations") or {}).get(f, 0),
-               "placement": ((cfg.get("image_placements") or {}).get(f)
-                             or dict(screens.DEFAULT_PLACEMENT)),
-               "reviewed": f in (cfg.get("reviewed_images") or [])})
+                                   "collection", "file", "rotation", "placement")}
+            | {"reviewed": a.get("file") in cfg["reviewed_images"]})
 
 
-async def _target_print(body: dict) -> dict:
-    """The print a per-image action is for: body["file"] when given (it must
-    be on the panel or looked ahead to by the review page), else the one on
-    the panel now. 404/409 when there is no such print."""
+async def _target_animal(body: dict) -> dict:
+    """The animal a per-image action is for: body["file"] when given (it must
+    be on the panel or fetched ahead by the review page), else the one on
+    the panel now. 404/409 when there is no such animal."""
     f = body.get("file")
     if f is not None:
         if not isinstance(f, str) or not f:
             raise HTTPException(400, "file must be a Commons file title")
-        a = await asyncio.to_thread(datasources.find_print, f)
+        a = await asyncio.to_thread(datasources.find_animal, f)
         if not a:
-            raise HTTPException(404, "no such print on the panel or in the review list")
+            raise HTTPException(404, "no such image on the panel or in the review list")
         return a
     a = datasources.cached_animal()
     if not a or not a.get("file"):
@@ -214,14 +211,13 @@ async def api_veto(request: Request):
     replacement immediately; 502 if none could be found."""
     body = await request.json()
     what = body.get("what")
-    cfg = state.load_config()
     if what == "animal":
-        a = await _target_print(body)
-        await asyncio.to_thread(state.update_config,
-                                vetoed_images=cfg["vetoed_images"] + [a["file"]])
+        a = await _target_animal(body)
+        await asyncio.to_thread(state.mutate, lambda cfg: {
+            "vetoed_images": cfg["vetoed_images"] + [a["file"]]})
         state.log_event("config", f"vetoed image: {a['file']} ({a.get('common_name')})")
         if not _on_panel(a["file"]):
-            # An upcoming print: its slot is looked up again on the review
+            # An upcoming image: its slot is fetched again from the review
             # page's next load; the panel is unchanged.
             return {"render": renderer.meta(), "current": _current()}
         m = await _rerender("veto")
@@ -248,110 +244,120 @@ async def api_rotate(request: Request):
         raise HTTPException(400, "degrees must be an integer")
     if step % 90:
         raise HTTPException(400, "degrees must be a multiple of 90")
-    a = await _target_print(body)
-    cfg = state.load_config()
-    rots = dict(cfg.get("image_rotations") or {})
-    rots[a["file"]] = (int(rots.get(a["file"], 0)) + step) % 360
-    cfg = await asyncio.to_thread(state.update_config, image_rotations=rots)
+    a = await _target_animal(body)
+    cfg = await asyncio.to_thread(state.mutate, lambda cfg: {"image_rotations": {
+        **cfg["image_rotations"],
+        a["file"]: (int(cfg["image_rotations"].get(a["file"], 0)) + step) % 360}})
     state.log_event("config", f"rotated image {a['file']} to "
                               f"{cfg['image_rotations'].get(a['file'], 0)}°")
     m = await _rerender("rotate") if _on_panel(a["file"]) else renderer.meta()
     return {"config": cfg, "render": m, "current": _current(cfg),
-            "print": _print_summary(a, cfg)}
+            "animal": _animal_summary(a, cfg)}
 
 
 @app.post("/api/placement")
 async def api_placement(request: Request):
-    """Save where a print sits in its art box: {x, y, scale} (see
+    """Save where an image sits in its art box: {x, y, scale} (see
     screens.normalize_placement), or {reset: true} for the automatic fit.
-    Per Commons file, like rotation; `file` defaults to the print on the
-    panel. Re-renders when that print is on the panel; the version bumps
-    only if the pixels changed (content hash)."""
+    Per Commons file, like rotation; `file` defaults to the image on the
+    panel. Re-renders when that image is on the panel."""
     body = await request.json()
-    a = await _target_print(body)
-    cfg = state.load_config()
-    places = dict(cfg.get("image_placements") or {})
-    if body.get("reset"):
-        places.pop(a["file"], None)
-    else:
-        try:
-            p = screens.normalize_placement(
-                {k: body.get(k, d) for k, d in screens.DEFAULT_PLACEMENT.items()})
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-        if p:
-            places[a["file"]] = p
-        else:
-            places.pop(a["file"], None)
-    cfg = await asyncio.to_thread(state.update_config, image_placements=places)
-    placed = cfg["image_placements"].get(a["file"])
+    a = await _target_animal(body)
+    try:
+        p = None if body.get("reset") else screens.normalize_placement(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    cfg = await asyncio.to_thread(state.mutate, lambda cfg: {
+        "image_placements": {**cfg["image_placements"], a["file"]: p}})
     state.log_event("config", f"placed image {a['file']} at "
-                              f"{placed or 'the automatic fit'}")
+                              f"{p or 'the automatic fit'}")
     m = await _rerender("placement") if _on_panel(a["file"]) else renderer.meta()
-    return {"render": m, "current": _current(cfg), "print": _print_summary(a, cfg)}
+    return {"render": m, "current": _current(cfg), "animal": _animal_summary(a, cfg)}
 
 
-@app.post("/api/reviewed")
-async def api_reviewed(request: Request):
-    """Mark a print reviewed (or not) on the review page: {file, reviewed}."""
+@app.post("/api/mark-reviewed")
+async def api_mark_reviewed(request: Request):
+    """Mark an image reviewed (or not) on the review page: {file, reviewed}.
+    `file` is required, unlike the other per-image actions: the mark is only
+    ever set from the review list, never for "whatever is on the panel"."""
     body = await request.json()
     if not isinstance(body.get("file"), str):
         raise HTTPException(400, "file is required")
-    a = await _target_print(body)
-    cfg = state.load_config()
-    done = set(cfg.get("reviewed_images") or [])
-    if body.get("reviewed", True):
-        done.add(a["file"])
-    else:
-        done.discard(a["file"])
-    cfg = await asyncio.to_thread(state.update_config, reviewed_images=sorted(done))
-    return {"print": _print_summary(a, cfg)}
+    a = await _target_animal(body)
+    mark = bool(body.get("reviewed", True))
+    cfg = await asyncio.to_thread(state.mutate, lambda cfg: {"reviewed_images": (
+        cfg["reviewed_images"] + [a["file"]] if mark
+        else [f for f in cfg["reviewed_images"] if f != a["file"]])})
+    return {"animal": _animal_summary(a, cfg)}
 
 
 REVIEW_DAYS = 14
 
 
+# The background fetch of upcoming animals the review page is waiting on.
+_upcoming_fetch: asyncio.Task | None = None
+
+
+def _fetch_upcoming_in_background(args: tuple) -> None:
+    """Resolve the review page's missing slots off the request (a cold
+    14-day fetch can outlast Cloudflare's 100 s timeout). One run at a
+    time; the page re-polls, and a later poll starts another run for
+    anything still missing."""
+    global _upcoming_fetch
+    if _upcoming_fetch and not _upcoming_fetch.done():
+        return
+
+    async def run():
+        try:
+            await asyncio.to_thread(datasources.upcoming_animals, *args, fetch=True)
+        except Exception as e:
+            log.error("fetching upcoming animals failed: %s", e, exc_info=True)
+    _upcoming_fetch = asyncio.create_task(run())
+
+
 @app.get("/api/review")
 async def api_review(days: int = REVIEW_DAYS):
-    """The upcoming prints in the order they will hang, from today: the
-    renderer's own slots and selection (datasources.upcoming_animals), each
-    with its settings. Slow on first sight of a slot (it fetches from
-    Commons); cached after."""
+    """The upcoming animals in the order they will hang, from today
+    (datasources.upcoming_animals), each with its settings. Answers at once
+    from the cache: a slot not fetched yet is "pending" and is fetched in
+    the background for the page's next poll."""
     cfg = state.load_config()
+    args = (date.today(), min(max(days, 1), 60), cfg["animal_offset"],
+            cfg["animal_period_days"], cfg["vetoed_images"])
     try:
-        items = await asyncio.to_thread(
-            datasources.upcoming_animals, date.today(), min(max(days, 1), 60),
-            cfg["animal_offset"], cfg["animal_period_days"], cfg["vetoed_images"])
+        items = await asyncio.to_thread(datasources.upcoming_animals, *args, fetch=False)
     except Exception as e:
-        log.error("review lookahead failed: %s", e, exc_info=True)
-        raise HTTPException(502, f"could not look ahead: {e}")
+        log.error("reading upcoming animals failed: %s", e, exc_info=True)
+        raise HTTPException(500, f"could not read the upcoming animals: {e}")
+    if any(it["pending"] for it in items):
+        _fetch_upcoming_in_background(args)
     current = datasources.cached_animal()
-    out = [{"slot": it["slot"], "dates": it["dates"],
+    out = [{"dates": it["dates"], "pending": it["pending"],
             "on_panel": bool(it["animal"] and current
                              and it["animal"].get("file") == current.get("file")),
-            "print": _print_summary(it["animal"], cfg) if it["animal"] else None}
+            "animal": _animal_summary(it["animal"], cfg) if it["animal"] else None}
            for it in items]
-    prints = [o["print"] for o in out if o["print"]]
-    return {"items": out, "total": len(prints),
-            "reviewed": sum(1 for p in prints if p["reviewed"])}
+    animals = [o["animal"] for o in out if o["animal"]]
+    return {"items": out, "total": len(animals),
+            "reviewed": sum(1 for a in animals if a["reviewed"])}
 
 
-PREVIEW_MAX = 900   # px, the long side of a print preview
+PREVIEW_MAX = 900   # px, the long side of an animal preview
 
 
-@app.get("/api/print-preview.png")
-async def api_print_preview(file: str, x: float | None = None, y: float | None = None,
-                            scale: float | None = None, mode: str = "panel"):
-    """One print alone in its art box, drawn by the dashboard's own code at
+@app.get("/api/animal-preview.png")
+async def api_animal_preview(file: str, x: float | None = None, y: float | None = None,
+                             scale: float | None = None, mode: str = "panel"):
+    """One image alone in its art box, drawn by the dashboard's own code at
     the panel's size and layout — with the saved placement, or with x/y/scale
     when given (an unsaved draft from the Adjust control). mode "panel" is
     dithered to the six inks and shown as the panel will; "raw" is the RGB.
     The placement actually drawn (clamped to the box) is in X-Placement."""
     if mode not in ("raw", "panel"):
         raise HTTPException(400, "mode must be raw|panel")
-    a = await asyncio.to_thread(datasources.find_print, file)
+    a = await asyncio.to_thread(datasources.find_animal, file)
     if not a:
-        raise HTTPException(404, "no such print on the panel or in the review list")
+        raise HTTPException(404, "no such image on the panel or in the review list")
     cfg = state.load_config()
     animal = screens.with_image_settings(a, cfg)
     if x is not None or y is not None or scale is not None:
@@ -375,7 +381,7 @@ async def api_print_preview(file: str, x: float | None = None, y: float | None =
     try:
         png, placed = await asyncio.to_thread(draw)
     except Exception as e:
-        log.error("print preview failed for %s: %s", file, e, exc_info=True)
+        log.error("animal preview failed for %s: %s", file, e, exc_info=True)
         raise HTTPException(500, f"preview failed: {e}")
     return Response(png, media_type="image/png",
                     headers={"Cache-Control": "no-store",

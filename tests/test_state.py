@@ -90,3 +90,27 @@ def test_image_rotations_validation(data_dir):
         state.update_config(image_rotations={"File:A.tif": 45})
     with pytest.raises(TypeError):
         state.update_config(image_rotations=["File:A.tif"])
+
+
+def test_concurrent_mutations_to_different_keys_both_survive(data_dir):
+    """mutate loads, changes and saves under one lock: a second writer that
+    starts while the first is between its load and its save must not have
+    its change overwritten by the first's stale copy."""
+    import threading
+    import time
+    inside = threading.Event()
+
+    def slow_mark(cfg):
+        inside.set()
+        time.sleep(0.2)     # the window a load-outside-the-lock would lose
+        return {"reviewed_images": cfg["reviewed_images"] + ["File:A.tif"]}
+
+    t = threading.Thread(target=state.mutate, args=(slow_mark,))
+    t.start()
+    inside.wait(5)
+    state.mutate(lambda cfg: {"image_placements": {
+        **cfg["image_placements"], "File:B.tif": {"x": 0.1, "y": 0, "scale": 1}}})
+    t.join(5)
+    cfg = state.load_config()
+    assert cfg["reviewed_images"] == ["File:A.tif"]
+    assert "File:B.tif" in cfg["image_placements"]

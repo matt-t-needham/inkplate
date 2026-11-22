@@ -1,5 +1,5 @@
-"""The review page's lookahead: upcoming prints must be the ones that will
-actually hang, in the order they will hang."""
+"""The review page's upcoming animals must be the ones that will actually
+hang, in the order they will hang."""
 import io
 import json
 from datetime import date
@@ -46,8 +46,8 @@ def commons(monkeypatch):
 
 
 def test_review_order_is_the_order_the_panel_will_hang(data_dir, commons):
-    """Each day's get_animal, run fresh, is what the lookahead listed for that
-    day: same slots (period and offset included), same selection."""
+    """Each day's get_animal, run fresh, is what upcoming_animals listed for
+    that day: same slots (period and offset included), same selection."""
     start, days, period, offset = date(2026, 11, 21), 6, 2, 1
     hung = []
     for i in range(days):
@@ -57,28 +57,36 @@ def test_review_order_is_the_order_the_panel_will_hang(data_dir, commons):
     for p in (data_dir / "cache").iterdir():   # forget everything
         p.unlink()
 
+    # Without fetch nothing is resolved yet: every slot is pending.
+    cold = datasources.upcoming_animals(start, days, offset, period, fetch=False)
+    assert all(it["pending"] and it["animal"] is None for it in cold)
     listed = datasources.upcoming_animals(start, days, offset, period)
+    assert not any(it["pending"] for it in listed)
     assert [(d, it["animal"]["file"]) for it in listed for d in it["dates"]] == hung
     assert len(listed) == len({f for _, f in hung})   # one entry per slot
-    # Looking ahead never touches what the panel is showing.
+    # Fetching ahead never touches what the panel is showing.
     assert not (data_dir / "cache" / "animal.json").exists()
     assert not (data_dir / "cache" / datasources.ANIMAL_IMG).exists()
 
 
-def test_a_reviewed_print_hangs_even_if_commons_changes(data_dir, commons):
-    """Its day takes the looked-ahead print rather than searching again."""
+def test_only_a_reviewed_or_adjusted_upcoming_image_is_kept(data_dir, commons):
+    """Its day takes the prefetched image rather than searching again, so
+    what was reviewed hangs even if Commons (or the selection) has changed.
+    An image nobody touched is resolved afresh, so later selection fixes
+    apply to it; a vetoed one is never kept."""
     day = date(2026, 11, 22)
     ahead = datasources.upcoming_animals(day, 1)[0]["animal"]
     commons["n"] = 2
-    shown = datasources.get_animal(day)
+    assert datasources.get_animal(day)["file"] != ahead["file"]
+    (data_dir / "cache" / "animal.json").unlink()
+    shown = datasources.get_animal(day, keep={ahead["file"]})
     assert shown["file"] == ahead["file"]
     assert (data_dir / "cache" / datasources.ANIMAL_IMG).read_bytes() == PLATE
-    # A vetoed one is not adopted: the day is searched again.
-    assert datasources.get_animal(date(2026, 11, 22), vetoed=[ahead["file"]])["file"] \
-        != ahead["file"]
+    assert datasources.get_animal(day, vetoed=[ahead["file"]],
+                                  keep={ahead["file"]})["file"] != ahead["file"]
 
 
-def test_vetoed_lookahead_is_replaced_and_passed_slots_pruned(data_dir, commons):
+def test_vetoed_upcoming_image_is_replaced_and_passed_slots_pruned(data_dir, commons):
     day = date(2026, 11, 21)
     first = datasources.upcoming_animals(day, 2)
     vetoed = [first[1]["animal"]["file"]]
@@ -86,8 +94,8 @@ def test_vetoed_lookahead_is_replaced_and_passed_slots_pruned(data_dir, commons)
     assert again[0]["animal"]["file"] == first[0]["animal"]["file"]
     assert again[1]["animal"]["file"] not in vetoed
     datasources.upcoming_animals(date(2026, 11, 22), 1)
-    left = {p.name for p in (data_dir / "cache" / "prints").iterdir()}
+    left = {p.name for p in (data_dir / "cache" / "upcoming").iterdir()}
     assert left == {f"{first[1]['slot']}.json", f"{first[1]['slot']}.jpg"}
-    assert json.loads((data_dir / "cache" / "prints"
+    assert json.loads((data_dir / "cache" / "upcoming"
                        / f"{first[1]['slot']}.json").read_text())["data"]["file"] \
         == again[1]["animal"]["file"]

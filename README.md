@@ -94,11 +94,12 @@ docker logs apps-inkplate-1 -f
   It can't be undone from the pane. **Rotate** turns a plate scanned
   sideways; **Adjust** moves and scales the print within its own area
   (drag, scale slider, Reset to automatic, Save) — both remembered for that
-  image. The preview is drawn by the dashboard's own code.
+  image.
 - **Review upcoming prints** (`/review`) — the next 14 days' prints in the
   order they will hang, each with its preview and the same move/scale,
-  rotate and veto actions, plus a *reviewed* mark so a batch can be worked
-  through. A print reviewed here is the one that hangs on its day.
+  rotate and veto actions, plus a *reviewed* mark so they can be worked
+  through. A print reviewed or adjusted here is the one that hangs on its
+  day.
 - **Configuration** — screen picker, **panel rotation** (0/90/180/270°,
   the panel's clockwise turn — 90° or 270° hangs it vertically and the
   dashboard switches to its portrait layout; the device still receives a

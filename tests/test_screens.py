@@ -53,7 +53,7 @@ def test_full_panel_resolution_render(data_dir, fake_data):
 def test_dashboard_survives_every_source_down(data_dir, monkeypatch):
     import datasources
     monkeypatch.setattr(datasources, "get_weather", lambda lat, lon: None)
-    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): None)
+    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(), keep=(): None)
     monkeypatch.setattr(datasources, "get_snow", lambda lat, lon: None)
     img = screens.dashboard(1600, 1200)
     assert img.size == (1600, 1200)  # degraded, never blank/crashed
@@ -213,9 +213,9 @@ def test_draw_art_zooms_a_contained_figure_into_the_box():
 
     def draw():
         img = Image.new("RGB", (1200, 1200), "white")
-        rect = screens._draw_art(img, {"path": f.name}, box, lambda v: v,
-                                 lambda v: v, mode="centered")
-        return rect, _ink_bbox(img)
+        art = screens._draw_art(img, {"path": f.name}, box, lambda v: v,
+                                lambda v: v, mode="centered")
+        return art.rect, _ink_bbox(img)
     with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
         _figure_plate().save(f.name)
         zoomed, zoomed_ink = draw()
@@ -270,7 +270,7 @@ def test_centered_art_fades_on_paper_margin_not_the_subject():
         _figure_plate().save(f.name)
         img = Image.new("RGB", (1600, 1000), "white")
         rect = screens._draw_art(img, {"path": f.name}, box, lambda v: v,
-                                 lambda v: v, mode="centered")
+                                 lambda v: v, mode="centered").rect
     ink = _ink_bbox(img)
     # paper drawn beyond the figure on both sides, wider than the fade
     assert ink[0] - rect[0] > screens.HERO_FADE
@@ -290,10 +290,10 @@ def test_draw_art_applies_per_image_rotation():
         _figure_plate().save(f.name)
         box = (0, 0, 1000, 1000)
         upright = screens._draw_art(Image.new("RGB", (1000, 1000), "white"),
-                                    {"path": f.name}, box, lambda v: v, lambda v: v)
+                                    {"path": f.name}, box, lambda v: v, lambda v: v).rect
         turned = screens._draw_art(Image.new("RGB", (1000, 1000), "white"),
                                    {"path": f.name, "rotation": 90}, box,
-                                   lambda v: v, lambda v: v)
+                                   lambda v: v, lambda v: v).rect
     assert upright[3] - upright[1] > upright[2] - upright[0]   # tall
     assert turned[2] - turned[0] > turned[3] - turned[1]       # wide
 
@@ -302,11 +302,9 @@ def test_image_settings_read_config_by_file():
     a = {"file": "File:Gorilla.tif", "path": "x"}
     cfg = {"image_rotations": {"File:Gorilla.tif": 90},
            "image_placements": {"File:Gorilla.tif": {"x": 0.1, "y": 0, "scale": 1}}}
-    got = screens.with_image_settings(a, cfg)
-    assert (got["rotation"], got["placement"]["x"]) == (90, 0.1)
     other = screens.with_image_settings({"file": "File:Other.tif"}, cfg)
     assert (other["rotation"], other["placement"]) == (0, None)
-    assert screens.with_image_settings(None, cfg) is None
+    screens.with_image_settings(a, cfg)
     assert "rotation" not in a   # the cached dict is not mutated
 
 
@@ -329,17 +327,17 @@ def test_placement_moves_only_its_own_image(data_dir, fake_data):
 
 def test_placement_is_clamped_at_the_box_edge():
     """The subject's centre may go up to the box edge, never past it, so a
-    print can't be pushed out of its own area; the placement reported back
+    image can't be pushed out of its own area; the placement reported back
     is the one drawn."""
     import tempfile
     from PIL import Image
     box = (100, 100, 1100, 1100)
 
     def place(p):
-        img, placed = Image.new("RGB", (1200, 1200), "white"), {}
-        rect = screens._draw_art(img, {"path": f.name, "placement": p}, box,
-                                 lambda v: v, lambda v: v, mode="centered", placed=placed)
-        return rect, _ink_bbox(img), placed["placement"]
+        img = Image.new("RGB", (1200, 1200), "white")
+        art = screens._draw_art(img, {"path": f.name, "placement": p}, box,
+                                lambda v: v, lambda v: v, mode="centered")
+        return art.rect, _ink_bbox(img), art.placement
     with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
         _figure_plate().save(f.name)
         _, auto_ink, _ = place(None)

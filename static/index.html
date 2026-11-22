@@ -327,7 +327,7 @@ function renderNow(cur) {
   $('now-animal').textContent = a ? a.common_name : 'none cached yet';
   $('now-animal-sub').textContent = a ? [a.sci_name, a.year, a.artist,
     a.rotation ? 'turned ' + a.rotation + '°' : null,
-    a.placement && !Placement.same(a.placement, Placement.DEFAULT) ? 'adjusted' : null,
+    a.placement ? 'adjusted' : null,
   ].filter(Boolean).join(' · ') : '';
   $('btn-veto-animal').disabled = !(a && a.file);
   $('btn-rotate-animal').disabled = !(a && a.file);
@@ -336,7 +336,7 @@ function renderNow(cur) {
   if (adjuster && !(a && a.file === adjuster.file)) closeAdjust();
 }
 
-// ── Now showing: adjust (move/scale within the art box, per image) ──
+// ── Now showing: adjust ──
 let adjuster = null;
 function closeAdjust() {
   if (adjuster) adjuster.ctl.destroy();

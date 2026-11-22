@@ -204,16 +204,23 @@ previous code on every layout).
 
 The pane's **Adjust** and the **review page** (`/review`) share
 `static/placement.js`; its picture is always a server render
-(`/api/print-preview.png`: the dashboard's own `art_box` + `_draw_art`,
+(`/api/animal-preview.png`: the dashboard's own `art_box` + `_draw_art`,
 dithered to the six inks), never a CSS imitation — CSS only nudges the last
 render while a finger is down.
 
 The review page lists the next 14 days' prints. They come from the same
 slots (`slot_for`) and the same selection (`datasources._resolve`) as the
-panel; upcoming slots are resolved into `cache/prints/<slot>.*`, never over
-the panel's own `animal.*`, and **the panel adopts a looked-ahead print when
-its day comes**, so what was reviewed is what hangs even if Commons changes
-in between. `reviewed_images` in config records what has been worked
+panel; upcoming slots are fetched into `cache/upcoming/<slot>.*`, never over
+the panel's own `animal.*`. `/api/review` answers at once from that cache and
+fetches missing slots in the background (a cold 14-day fetch can outlast
+Cloudflare's 100 s timeout); the page re-polls while any are pending.
+
+**When its day comes, the panel takes the prefetched print only if Matt
+touched it** — marked it reviewed, or saved a placement or rotation for it —
+and the slot still maps to that animal. So what was reviewed is what hangs
+even if Commons changes in between, but an untouched prefetch (up to 28 days
+ahead) is resolved afresh, so selection-filter fixes made meanwhile still
+apply to it. `reviewed_images` in config records what has been worked
 through. Old placements and reviewed marks are not pruned: one short entry
 per image, a few hundred a year at most.
 

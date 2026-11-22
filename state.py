@@ -18,7 +18,9 @@ import screens
 
 log = logging.getLogger("inkplate.state")
 
-_lock = threading.Lock()
+# Re-entrant: update_config/mutate hold it across load-change-save and
+# save_config takes it again inside.
+_lock = threading.RLock()
 
 ROTATIONS = (0, 90, 180, 270)
 
@@ -67,8 +69,8 @@ DEFAULT_CONFIG = {
     # keyed by Commons file title like image_rotations: {"x", "y", "scale"},
     # see screens.normalize_placement. Only non-automatic entries are kept.
     "image_placements": {},
-    # Commons file titles marked reviewed on the review page, so a batch of
-    # upcoming prints can be worked through and what's left is visible.
+    # Commons file titles marked reviewed on the review page, so the
+    # upcoming images can be worked through and what's left is visible.
     "reviewed_images": [],
     # Monotonic content version. The device compares this against the version
     # it stored in RTC memory to decide whether to redraw (a redraw costs ~20s
@@ -137,7 +139,21 @@ def save_config(cfg: dict) -> None:
 
 def update_config(**changes) -> dict:
     """Validated read-modify-write. Returns the new config."""
-    cfg = load_config()
+    with _lock:
+        return _apply(load_config(), changes)
+
+
+def mutate(fn) -> dict:
+    """Read-modify-write where the change depends on the current config:
+    `fn(cfg)` returns the changes for update_config, computed from a copy
+    loaded under the same lock as the save, so concurrent writers can't
+    drop each other's edits. Returns the new config."""
+    with _lock:
+        cfg = load_config()
+        return _apply(cfg, fn(cfg))
+
+
+def _apply(cfg: dict, changes: dict) -> dict:
     if "refresh_minutes" in changes:
         v = int(changes["refresh_minutes"])
         cfg["refresh_minutes"] = max(config.MIN_REFRESH_MINUTES, min(config.MAX_REFRESH_MINUTES, v))
@@ -228,10 +244,11 @@ def update_config(**changes) -> dict:
 
 
 def bump_version() -> dict:
-    cfg = load_config()
-    cfg["image_version"] += 1
-    save_config(cfg)
-    return cfg
+    with _lock:
+        cfg = load_config()
+        cfg["image_version"] += 1
+        save_config(cfg)
+        return cfg
 
 
 # ── ndjson logs ───────────────────────────────────────────────────────────────

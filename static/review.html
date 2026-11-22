@@ -19,12 +19,8 @@
     flex: none; padding: calc(env(safe-area-inset-top) + 14px) 16px 12px;
     border-bottom: 1px solid var(--bix-border, #313244);
   }
-  .bix-site { font-size: .85rem; color: var(--bix-text-faint, #6c7086); }
-  .bix-site a { color: inherit; text-decoration: none; }
-  .bix-site .sep { margin: 0 .5em; color: var(--bix-border-strong, #45475a); }
   h1 { font-weight: 300; letter-spacing: -.035em; line-height: 1.08; font-size: 1.9rem;
        margin: 8px 0 4px; }
-  .bix-dot { font-style: normal; color: var(--bix-accent, #fab387); }
   .lede { margin: 0 0 12px; color: var(--bix-text-soft, #a6adc8); font-size: .9rem; max-width: 60ch; }
   .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .counts { font-family: var(--bix-mono, ui-monospace, Menlo, monospace); font-size: .85rem;
@@ -45,8 +41,6 @@
           background: var(--bix-bg-sunken, #181825); padding: 14px; }
   .item.busy { opacity: .55; pointer-events: none; }
   .when { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
-  .bix-label { font-size: .7rem; letter-spacing: .14em; text-transform: uppercase;
-               color: var(--bix-text-faint, #6c7086); }
   .name { font-size: 1.15rem; font-weight: 400; margin: 0; }
   .sub { color: var(--bix-text-soft, #a6adc8); font-size: .88rem; }
   .file { font-family: var(--bix-mono, ui-monospace, Menlo, monospace); font-size: .72rem;
@@ -67,7 +61,7 @@
     border: 1px solid var(--bix-border-strong, #45475a); }
   .acts button.veto { color: var(--bix-danger, #f38ba8); border-color: var(--bix-danger, #f38ba8); }
   .acts button:disabled { opacity: .45; cursor: default; }
-  .missing { color: var(--bix-text-soft, #a6adc8); font-size: .9rem; margin-top: 8px; }
+  .missing, .pending { color: var(--bix-text-soft, #a6adc8); font-size: .9rem; margin-top: 8px; }
   .empty { text-align: center; color: var(--bix-text-muted, #7f849c); padding: 48px 16px; }
   .toast { position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 16px);
     max-width: 640px; margin: 0 auto; background: var(--bix-surface, #313244);
@@ -133,10 +127,20 @@ function fmtDates(ds) {
 }
 
 function drawCounts() {
-  const prints = items.filter(it => it.print);
-  const done = prints.filter(it => it.print.reviewed).length;
-  $('counts').innerHTML = `<b>${done}</b> of <b>${prints.length}</b> reviewed · ` +
-                          `<b>${prints.length - done}</b> left`;
+  const animals = items.filter(it => it.animal);
+  const done = animals.filter(it => it.animal.reviewed).length;
+  const fetching = items.filter(it => it.pending).length;
+  $('counts').innerHTML = `<b>${done}</b> of <b>${animals.length}</b> reviewed · ` +
+                          `<b>${animals.length - done}</b> left` +
+                          (fetching ? ` · <b>${fetching}</b> fetching` : '');
+}
+
+function subLine(a) {
+  return [a.sci_name, a.year, a.artist, a.rotation ? 'turned ' + a.rotation + '°' : null]
+    .filter(Boolean).join(' · ');
+}
+function markHtml(a) {
+  return `<span class="mark ${a.reviewed ? 'done' : ''}">${a.reviewed ? 'Reviewed' : 'To review'}</span>`;
 }
 
 // Each preview is a server render, so only draw the ones near the viewport.
@@ -144,11 +148,11 @@ const io = new IntersectionObserver(es => {
   for (const e of es) {
     if (!e.isIntersecting) continue;
     io.unobserve(e.target);
-    const it = items.find(i => i.print && i.print.file === e.target.dataset.file);
-    if (!it || mounted.has(it.print.file)) continue;
-    mounted.set(it.print.file, Placement.mount(e.target, {
-      file: it.print.file, placement: it.print.placement,
-      onSaved: p => { it.print = p; toast('Placement saved for ' + p.common_name); },
+    const it = items.find(i => i.animal && i.animal.file === e.target.dataset.file);
+    if (!it || mounted.has(it.animal.file)) continue;
+    mounted.set(it.animal.file, Placement.mount(e.target, {
+      file: it.animal.file, placement: it.animal.placement,
+      onSaved: a => { it.animal = a; toast('Placement saved for ' + a.common_name); },
     }));
   }
 }, {root: $('main'), rootMargin: '600px 0px'});
@@ -156,23 +160,24 @@ const io = new IntersectionObserver(es => {
 function itemHtml(it, i) {
   const when = `<div class="when"><span class="bix-label">${esc(fmtDates(it.dates))}</span>` +
     (it.on_panel ? '<span class="bix-label">on the panel now</span>' : '') +
-    (it.print ? `<span class="mark ${it.print.reviewed ? 'done' : ''}">` +
-                `${it.print.reviewed ? 'Reviewed' : 'To review'}</span>` : '') + '</div>';
-  if (!it.print) {
-    return `<article class="item">${when}<div class="missing">No usable print was found for
+    (it.animal ? markHtml(it.animal) : '') + '</div>';
+  if (it.pending) {
+    return `<article class="item" data-i="${i}">${when}<div class="pending">Fetching… The first
+      look at a print comes from Wikimedia Commons and can take a minute.</div></article>`;
+  }
+  if (!it.animal) {
+    return `<article class="item" data-i="${i}">${when}<div class="missing">No usable print was found for
       this day in any collection. The panel keeps the previous one; it is looked up again later.</div></article>`;
   }
-  const p = it.print;
-  const sub = [p.sci_name, p.year, p.artist, p.rotation ? 'turned ' + p.rotation + '°' : null]
-    .filter(Boolean).map(esc).join(' · ');
+  const a = it.animal;
   return `<article class="item" data-i="${i}">${when}
-    <h2 class="name">${esc(p.common_name)}</h2>
-    <div class="sub">${sub}</div>
-    <div class="file">${esc(p.file)}</div>
+    <h2 class="name">${esc(a.common_name)}</h2>
+    <div class="sub">${esc(subLine(a))}</div>
+    <div class="file">${esc(a.file)}</div>
     <div class="body">
-      <div class="adj-slot" data-file="${esc(p.file)}"></div>
+      <div class="adj-slot" data-file="${esc(a.file)}"></div>
       <div class="acts">
-        <button type="button" data-act="reviewed">${p.reviewed ? 'Mark not reviewed' : 'Mark reviewed'}</button>
+        <button type="button" data-act="reviewed">${a.reviewed ? 'Mark not reviewed' : 'Mark reviewed'}</button>
         <button type="button" data-act="rotate" title="Turn the plate a quarter clockwise, for a scan bound in sideways">Rotate</button>
         <button type="button" class="veto" data-act="veto">Veto image</button>
       </div>
@@ -180,12 +185,12 @@ function itemHtml(it, i) {
   </article>`;
 }
 
+const hidden = it => $('hide-done').checked && it.animal && it.animal.reviewed;
+
 function draw() {
   for (const c of mounted.values()) c.destroy();
   mounted.clear();
-  const hide = $('hide-done').checked;
-  const shown = items.map((it, i) => [it, i])
-    .filter(([it]) => !(hide && it.print && it.print.reviewed));
+  const shown = items.map((it, i) => [it, i]).filter(([it]) => !hidden(it));
   $('list').innerHTML = shown.length ? shown.map(([it, i]) => itemHtml(it, i)).join('')
     : `<div class="empty">${items.length ? 'Everything in this stretch is reviewed.'
                                          : 'Nothing upcoming.'}</div>`;
@@ -193,14 +198,52 @@ function draw() {
   drawCounts();
 }
 
+// Slots not fetched yet come back pending and are fetched in the background;
+// re-poll until none are left, swapping in only the cards that resolved so
+// an open adjustment elsewhere on the page is left alone.
+const POLL_MS = 4000;
+let pollTimer = null;
+
+async function fetchReview() {
+  const r = await fetch('api/review?days=' + encodeURIComponent($('days').value));
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+  return j.items;
+}
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (items.some(it => it.pending)) pollTimer = setTimeout(poll, POLL_MS);
+}
+
+async function poll() {
+  let fresh;
+  try { fresh = await fetchReview(); }
+  catch (e) { toast('Could not check for fetched prints: ' + e.message, true); schedulePoll(); return; }
+  if (fresh.length !== items.length || fresh.some((n, i) => n.dates[0] !== items[i].dates[0])) {
+    items = fresh; draw();
+  } else {
+    fresh.forEach((n, i) => {
+      if (!items[i].pending || n.pending) return;
+      items[i] = n;
+      const card = $('list').querySelector(`.item[data-i="${i}"]`);
+      if (!card) return;
+      if (hidden(n)) { card.remove(); return; }
+      card.outerHTML = itemHtml(n, i);
+      const slot = $('list').querySelector(`.item[data-i="${i}"] .adj-slot`);
+      if (slot) io.observe(slot);
+    });
+    drawCounts();
+  }
+  schedulePoll();
+}
+
 async function load() {
-  const days = $('days').value;
+  clearTimeout(pollTimer);
   try {
-    const r = await fetch('api/review?days=' + encodeURIComponent(days));
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
-    items = j.items;
+    items = await fetchReview();
     draw();
+    schedulePoll();
   } catch (e) {
     $('list').innerHTML = `<div class="empty">Could not load the upcoming prints: ${esc(e.message)}</div>`;
     $('counts').textContent = 'not loaded';
@@ -212,30 +255,27 @@ $('list').addEventListener('click', async e => {
   if (!btn) return;
   const card = btn.closest('.item');
   const it = items[+card.dataset.i];
-  const p = it.print;
+  const a = it.animal;
   card.classList.add('busy');
   try {
     if (btn.dataset.act === 'reviewed') {
-      const j = await Placement.postJSON('api/reviewed', {file: p.file, reviewed: !p.reviewed});
-      it.print = j.print;
-      if ($('hide-done').checked && it.print.reviewed) { draw(); return; }
+      const j = await Placement.postJSON('api/mark-reviewed', {file: a.file, reviewed: !a.reviewed});
+      it.animal = j.animal;
+      if (hidden(it)) { draw(); return; }
       // Redraw just this card's header and button; keep its preview.
-      card.querySelector('.mark').outerHTML = `<span class="mark ${it.print.reviewed ? 'done' : ''}">` +
-        `${it.print.reviewed ? 'Reviewed' : 'To review'}</span>`;
-      btn.textContent = it.print.reviewed ? 'Mark not reviewed' : 'Mark reviewed';
+      card.querySelector('.mark').outerHTML = markHtml(it.animal);
+      btn.textContent = it.animal.reviewed ? 'Mark not reviewed' : 'Mark reviewed';
       drawCounts();
     } else if (btn.dataset.act === 'rotate') {
-      const j = await Placement.postJSON('api/rotate', {file: p.file, degrees: 90});
-      it.print = j.print;
-      card.querySelector('.sub').textContent =
-        [it.print.sci_name, it.print.year, it.print.artist,
-         it.print.rotation ? 'turned ' + it.print.rotation + '°' : null].filter(Boolean).join(' · ');
-      const c = mounted.get(p.file);
+      const j = await Placement.postJSON('api/rotate', {file: a.file, degrees: 90});
+      it.animal = j.animal;
+      card.querySelector('.sub').textContent = subLine(it.animal);
+      const c = mounted.get(a.file);
       if (c) c.reload();
     } else if (btn.dataset.act === 'veto') {
-      if (!confirm(`Veto ${p.common_name}'s image? It's removed from rotation for good, ` +
+      if (!confirm(`Veto ${a.common_name}'s image? It's removed from rotation for good, ` +
                    `and another plate takes its day.`)) return;
-      await Placement.postJSON('api/veto', {what: 'animal', file: p.file});
+      await Placement.postJSON('api/veto', {what: 'animal', file: a.file});
       toast('Vetoed. Finding a replacement plate…');
       await load();
     }
