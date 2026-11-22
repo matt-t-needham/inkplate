@@ -62,3 +62,31 @@ def test_daily_renders_without_a_print(data_dir, fake_data, monkeypatch):
         img = screens.daily(1200, 1600)
         # the print's half is paper (past where the longest example title ends)
         assert img.crop((900, 0, 1200, 1600)).getextrema() == ((255, 255),) * 3
+
+
+def test_daily_print_is_full_bleed_and_fades_only_on_its_inner_edge():
+    """A scene covers the daily box at full opacity right up to the frame's
+    top, right and bottom; only the inner left edge fades into the paper."""
+    import tempfile
+    from PIL import Image
+    with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
+        Image.new("RGB", (900, 1200), (20, 20, 20)).save(f.name)
+        img = screens._daily(1200, 1600, {"path": f.name, "common_name": "x"},
+                             {"events": [], "todos": {}}, date(2026, 11, 16))
+    for xy in ((1199, 800), (1000, 1599), (1199, 1599), (1199, 1000), (1000, 1580)):
+        assert img.getpixel(xy)[0] < 40, xy                  # opaque at the border
+    assert img.getpixel((600, 800)) == (255, 255, 255)       # transparent at the inner edge
+    assert 40 < img.getpixel((640, 800))[0] < 255             # fading in across it
+
+
+def test_daily_figure_covers_its_box():
+    """Full bleed applies to a figure on paper too: it is drawn over the
+    whole box, not contained in it as the dashboard does."""
+    import tempfile
+    from PIL import Image
+    box = screens._daily_art_box(1200, 1600)
+    with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
+        _figure_plate().save(f.name)
+        art = screens._draw_art(Image.new("RGB", (1200, 1600), "white"), {"path": f.name},
+                                box, lambda v: v, lambda v: v, mode="daily", layout="daily")
+    assert art.rect == box

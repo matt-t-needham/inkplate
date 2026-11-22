@@ -711,8 +711,9 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     mode "bleed" (landscape, stack): anchored to the box's right edge with
     the last ART_BLEED running off the frame, long fades on the left and
     the top/bottom edges so text can sit over it.
-    mode "daily": like bleed, but flush with the box's right edge (nothing
-    runs off) and faded in from the box's own left edge (_art_mask).
+    mode "daily": full bleed — every plate covers the box (a figure too,
+    cropped around its ink centroid), opaque to the frame's edges, faded in
+    only from the box's own inner left edge (_art_mask).
     mode "centered" (hero): the plate's ink centroid is put on the box's
     centre (clamped so nothing leaves the box) and drawn with up to
     HERO_CONTEXT of paper around it, so the soft HERO_FADE falls on that
@@ -741,7 +742,10 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
         plate = plate.rotate(-rot, expand=True)
     sheet, sb, is_scene = _prep_plate(plate)
     art = sheet.crop(sb)
-    if is_scene:
+    # Daily is full bleed: every plate covers its box, figures too (the
+    # crop is centred on the ink, and Adjust can move or shrink it).
+    cover = is_scene or mode == "daily"
+    if cover:
         scale = max(bw / art.width, bh / art.height)
     else:
         scale = min(bw / art.width, bh / art.height)
@@ -758,8 +762,8 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
         # Trim the overflow: a scene around its centre; a zoomed figure
         # around its ink centroid, but only ever through paper — the window
         # is clamped so the ink span stays whole.
-        if is_scene:
-            cx, cy = art.width / 2, art.height / 2
+        if cover:
+            cx, cy = _ink_centroid(art) if not is_scene else (art.width / 2, art.height / 2)
             lo_x = lo_y = 0
             hi_x, hi_y = art.width - bw, art.height - bh
         else:
@@ -798,9 +802,9 @@ def _art_mask(art: Image.Image, x: int, y: int, box, mode: str, X, Y) -> Image.I
     peacock dissolve early. Bleed art runs off the frame on the right, so
     that edge is left hard unless a placement has pulled it inside. Daily
     art fades in across the first DAILY_FADE of its *box*, wherever the
-    art itself starts, and keeps hard edges where it meets the box."""
+    art itself starts, and has no other fade: it is full bleed."""
     if mode == "daily":
-        return _daily_mask(art, x, y, box, Y)
+        return _daily_mask(art, x, box)
     if mode == "centered":
         fx, fy = min(0.45, X(HERO_FADE) / art.width), min(0.45, Y(HERO_FADE) / art.height)
         return _edge_fade_mask(art.width, art.height, left=fx, right=fx, top=fy, bottom=fy)
@@ -1228,20 +1232,15 @@ def _daily_art_box(width: int, height: int):
     return (X(DAILY_LANDSCAPE_ART_X), 0, width, height)
 
 
-def _daily_mask(art: Image.Image, x: int, y: int, box, Y) -> Image.Image:
-    """Transparent at the box's left edge to opaque DAILY_FADE of the box
-    across it; top and bottom fade only where the art stops inside the box
-    (a placement that shrinks a scene), never at the frame edge."""
-    from PIL import ImageChops
+def _daily_mask(art: Image.Image, x: int, box) -> Image.Image:
+    """Full bleed: opaque right up to the frame's edges, faded only on the
+    box's inner left edge where it meets the calendar — transparent there,
+    opaque DAILY_FADE of the box across it, wherever the art itself starts."""
     fade = max(1.0, (box[2] - box[0]) * DAILY_FADE)
     hx = Image.new("L", (art.width, 1))
     hx.putdata([max(0, min(255, int(255 * (x + i - box[0]) / fade)))
                 for i in range(art.width)])
-    edge = Y(ART_FADE_EDGE) / art.height
-    vy = _edge_fade_mask(1, art.height, left=0, right=0,
-                         top=min(0.45, edge) if y > box[1] else 0,
-                         bottom=min(0.45, edge) if y + art.height < box[3] else 0)
-    return ImageChops.darker(hx.resize(art.size), vy.resize(art.size))
+    return hx.resize(art.size)
 
 
 def _week(today: date) -> list[date]:

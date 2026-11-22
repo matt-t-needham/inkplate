@@ -194,8 +194,11 @@ A second real screen, `daily`, switched from the top of the pane
 (Dashboard / Daily; the old Screen dropdown now only picks test patterns).
 Portrait: this week's calendar (Monday to Sunday, `screens._week`, local
 date per §11; it moves on on Monday) and one todo list on the left, the
-daily print on the right half, faded in over the first 15% of its box
-(`DAILY_FADE`), caption top-right on the dashboard's lightened patch. Event
+daily print on the right half, full bleed: every plate covers the box (a
+figure too, cropped around its ink centroid, so unlike the dashboard this
+can cut ink; Adjust moves or shrinks it), opaque right up to the frame's
+edges, with its only fade on the box's inner left edge, over the first 15%
+of the box (`DAILY_FADE`) where it meets the calendar; caption top-right on the dashboard's lightened patch. Event
 titles may run on over the print. Landscape keeps the print to the right
 third with the list beside the calendar. The print has its own art layout,
 `daily`, used in both orientations; `panel_layout` returns it whenever the
