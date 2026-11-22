@@ -229,7 +229,14 @@ The vetoed `Quail 4.jpg` (10-22) was the Aerosport Quail, a light aircraft.
   "common name as another genus's epithet" rule was tried and dropped — it
   lost the wombat and "Alpine marmot". Listed: mantis, lion (Buffon's
   "Chien lion" lap dog), buzzard (Catesby's *Buteo … Gallinae Pavonis*, the
-  turkey vulture).
+  turkey vulture), magpie (Audubon's "Columbia Magpie or Jay", *Pica
+  bullockii* to him, the Mexican black-throated magpie-jay — shown
+  2026-10-26).
+- **NYPL book shots ranked last.** NYPL's Audubon files are photos of the open
+  book with a Kodak colour bar; the subject crop locked onto the bar and the
+  page edges (2026-10-26). Files titled "(NYPL …" or credited "Scan by …" sort
+  after real plate scans, like modern photos, and "Scan by NYPL" is never
+  printed as the artist — the corpus's artist is credited instead.
 - **Faint or blank downloads** (`_too_faint`): ink coverage of the subject box,
   measured with the renderer's own `_prep_plate`/`_ink_mask`. Five blank scans
   and pencil sketches in the sweep measured 0.2–3.3%, the faintest real plate
