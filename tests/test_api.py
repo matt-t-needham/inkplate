@@ -301,6 +301,20 @@ def test_animal_preview_reports_the_clamped_placement(client, fake_data):
     assert client.get("/api/animal-preview.png", params={"file": "File:Nope.tif"}).status_code == 404
 
 
+def test_daily_screen_adjusts_its_own_layout_in_the_panels_orientation(client, fake_data):
+    """With the daily screen up, Adjust and the review page place prints in
+    the daily layout, previewed at the panel's current orientation."""
+    _showing(fake_data)
+    for rotation, size in ((90, (1200, 1600)), (0, (1600, 1200))):
+        client.post("/api/config", json={"screen": "daily", "rotation": rotation})
+        assert client.get("/api/state").json()["art_layout"] == {"key": "daily",
+                                                                 "name": "daily view"}
+        r = client.get("/api/animal-preview.png", params={"file": "File:Fox.tif", "mode": "raw"})
+        w, h = Image.open(io.BytesIO(r.content)).size
+        box, _ = screens.art_box(*size, "daily", True)
+        assert abs(w / h - (box[2] - box[0]) / (box[3] - box[1])) < 0.01
+
+
 def test_review_marks_the_panel_image_and_round_trips_reviewed(client, fake_data, monkeypatch):
     import datasources
     _showing(fake_data)

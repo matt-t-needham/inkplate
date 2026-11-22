@@ -189,6 +189,33 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 26. The daily screen, on example data (2026-11-21)
+A second real screen, `daily`, switched from the top of the pane
+(Dashboard / Daily; the old Screen dropdown now only picks test patterns).
+Portrait: this week's calendar (Monday to Sunday, `screens._week`, local
+date per §11; it moves on on Monday) and one todo list on the left, the
+daily print on the right half, faded in over the first 15% of its box
+(`DAILY_FADE`), caption top-right on the dashboard's lightened patch. Event
+titles may run on over the print. Landscape keeps the print to the right
+third with the list beside the calendar. The print has its own art layout,
+`daily`, used in both orientations; `panel_layout` returns it whenever the
+daily screen is up, so Adjust and the review page place the right thing,
+previewed at the panel's current orientation.
+
+On the panel, mid-tones dither into noise and text must stay solid, so the
+mockup's tints become solid inks: **today** is a solid yellow bar down the
+left of its day block; a **done** item has an outlined (unfilled) tag in
+the owner's colour with a black letter, and its text and date are struck
+through. Owner tags always carry the letter (M blue, K red, MK yellow).
+The list is two open items per owner, then the three newest done. A week
+too busy to fit is squeezed to fewer lines per day ("+N more").
+
+**The calendar and list are example data.** The shared calendar feed and
+the planner service don't exist yet; `planner_stub.py` returns made-up
+events and todos shaped like their future data, generated relative to the
+current week, and the screen prints "Example data" along the bottom while
+it is in use. Replace the stub with the real sources, keeping the shape.
+
 ## 25. Per-image placement and a review page (2026-11-21)
 The automatic crop gets most plates right but not all (a mount card, a
 figure that wants to sit lower). **Placement** is a per-image correction,

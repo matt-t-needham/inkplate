@@ -120,8 +120,11 @@ def _layout_param(v, cfg: dict) -> str:
     return v
 
 
-def _layout_size(layout: str) -> tuple[int, int]:
-    """The frame size the dashboard draws an art layout at."""
+def _layout_size(layout: str, cfg: dict) -> tuple[int, int]:
+    """The frame size an art layout is drawn at. The daily view's layout is
+    used in either orientation, so it takes the panel's current one."""
+    if layout == screens.DAILY_LAYOUT:
+        return renderer.upright_size(cfg["rotation"])
     return renderer.upright_size(0 if layout == screens.LANDSCAPE_LAYOUT else 90)
 
 
@@ -398,7 +401,7 @@ async def api_animal_preview(file: str, layout: str | None = None,
             raise HTTPException(400, str(e))
 
     def draw():
-        img, placed = screens.art_preview(animal, cfg, layout, _layout_size(layout))
+        img, placed = screens.art_preview(animal, cfg, layout, _layout_size(layout, cfg))
         if mode == "panel":
             img = palette.simulate_panel(palette.dither_to_spectra(img))
         img.thumbnail((PREVIEW_MAX, PREVIEW_MAX))

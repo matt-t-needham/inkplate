@@ -97,6 +97,17 @@
   }
   button.danger:disabled, button.ghost:disabled { opacity:.5; cursor:default; }
   .msg { font-size:12px; } .msg.ok { color:var(--green); } .msg.err { color:var(--red); }
+
+  /* Screen switcher: the active one is filled and bold, not just coloured. */
+  .switcher { max-width:1400px; margin:0 auto; padding:18px 22px 0; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .switcher .seg { display:flex; border:1px solid var(--surface1); border-radius:8px; overflow:hidden; }
+  .switcher button {
+    min-height:44px; min-width:120px; padding:0 18px; font:inherit; font-size:15px;
+    background:none; color:var(--text); border:none; cursor:pointer;
+  }
+  .switcher button + button { border-left:1px solid var(--surface1); }
+  .switcher button[aria-pressed="true"] { background:var(--mauve); color:#11111b; font-weight:700; }
+  .switcher button:disabled { opacity:.5; cursor:default; }
 </style>
 </head>
 <body>
@@ -104,6 +115,14 @@
   <h1>inkplate<em>_</em>dash</h1>
   <div class="dev-badge"><span class="dot" id="dev-dot"></span><span id="dev-status">loading…</span></div>
 </header>
+
+<div class="switcher" role="group" aria-label="Screen">
+  <div class="seg">
+    <button type="button" data-screen="dashboard" aria-pressed="false">Dashboard</button>
+    <button type="button" data-screen="daily" aria-pressed="false">Daily</button>
+  </div>
+  <span class="msg" id="switch-msg"></span>
+</div>
 
 <main>
   <div class="col">
@@ -141,7 +160,6 @@
 
     <div class="card">
       <h2>Configuration</h2>
-      <div class="field"><label for="f-screen">Screen</label><select id="f-screen"></select></div>
       <div class="field"><label for="f-rotation" title="How the panel is hung: degrees turned clockwise from landscape. 90°/270° draw the dashboard portrait; the device still receives its native 1600×1200 frame, pre-turned.">Panel rotation</label>
         <select id="f-rotation">
           <option value="0">0° · landscape</option>
@@ -164,6 +182,11 @@
       <div style="display:flex;align-items:center">
         <button class="primary" id="btn-save">Save</button><span id="save-msg"></span>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Test patterns</h2>
+      <div class="field"><label for="f-screen" title="Shows a test pattern instead of the Dashboard or Daily screen; applies at once.">Pattern</label><select id="f-screen"></select></div>
     </div>
   </div>
 </main>
@@ -228,7 +251,6 @@ $('btn-save').addEventListener('click', async () => {
     const r = await fetch('api/config', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
-        screen: $('f-screen').value,
         rotation: parseInt($('f-rotation').value, 10),
         portrait_layout: $('f-portrait-layout').value,
         refresh_minutes: parseInt($('f-refresh').value, 10),
@@ -253,6 +275,40 @@ $('btn-save').addEventListener('click', async () => {
   }
   setTimeout(() => { msg.textContent = ''; }, 3000);
 });
+
+// ── Screen: the switcher (Dashboard / Daily) and the test-pattern picker ──
+// Both set the panel's screen through api/config, then re-render the preview.
+const MAIN_SCREENS = ['dashboard', 'daily'];
+async function setScreen(screen, msgEl) {
+  document.querySelectorAll('.switcher button').forEach(b => { b.disabled = true; });
+  try {
+    await api('POST', 'api/config', {screen});
+    await loadState();
+    refreshPreviewImg();
+  } catch (e) {
+    flash(msgEl, 'failed: ' + e.message, false);
+  } finally {
+    document.querySelectorAll('.switcher button').forEach(b => { b.disabled = false; });
+  }
+}
+document.querySelectorAll('.switcher button').forEach(b =>
+  b.addEventListener('click', () => setScreen(b.dataset.screen, $('switch-msg'))));
+$('f-screen').addEventListener('change', e => {
+  if (e.target.value) setScreen(e.target.value, $('save-msg'));
+});
+function renderScreen(st) {
+  document.querySelectorAll('.switcher button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.screen === st.config.screen)));
+  const sel = $('f-screen');
+  const patterns = st.screens.filter(s => !MAIN_SCREENS.includes(s));
+  if (sel.options.length !== patterns.length + 1) {
+    sel.innerHTML = '<option value="">none</option>' +
+      patterns.map(s => `<option value="${s}">${s}</option>`).join('');
+  }
+  if (document.activeElement !== sel) {
+    sel.value = patterns.includes(st.config.screen) ? st.config.screen : '';
+  }
+}
 
 function flash(el, text, ok) {
   el.textContent = text; el.className = 'msg ' + (ok ? 'ok' : 'err');
@@ -350,11 +406,7 @@ function renderState(st) {
 
   // config form — don't clobber fields the user is editing
   const focused = document.activeElement && document.activeElement.id;
-  const sel = $('f-screen');
-  if (sel.options.length !== st.screens.length) {
-    sel.innerHTML = st.screens.map(s => `<option value="${s}">${s}</option>`).join('');
-  }
-  if (focused !== 'f-screen') sel.value = st.config.screen;
+  renderScreen(st);
   const pl = $('f-portrait-layout');
   if (pl.options.length !== st.portrait_layouts.length) {
     pl.innerHTML = st.portrait_layouts.map(s => `<option value="${s}">${s}</option>`).join('');

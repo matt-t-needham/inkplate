@@ -102,7 +102,11 @@ docker logs apps-inkplate-1 -f
   rotate and veto actions, plus a *reviewed* mark so they can be worked
   through. A print reviewed or adjusted here is the one that hangs on its
   day.
-- **Configuration** — screen picker, **panel rotation** (0/90/180/270°,
+- **Screen switcher** (top of the pane) — *Dashboard* or *Daily* (this
+  week's calendar and the todo list beside the daily print; example data
+  until the calendar feed and planner exist — DECISIONS §26). The active one
+  is filled and bold.
+- **Configuration** — **panel rotation** (0/90/180/270°,
   the panel's clockwise turn — 90° or 270° hangs it vertically and the
   dashboard switches to its portrait layout; the device still receives a
   native 1600×1200 frame, pre-turned, so nothing changes on the firmware
@@ -115,6 +119,8 @@ docker logs apps-inkplate-1 -f
   then), animal cadence in days (default
   daily), weather and snow locations, tethered mode. Applies
   live; the device picks up cadence changes at its next check-in.
+- **Test patterns** — shows a test screen (palette, dither, alignment,
+  placeholder) instead; applies at once.
 - **Device** — battery (percent and volts) from the last check-in. The
   header badge turns red if the device misses ~2.5 wake windows. The full
   check-in history (RSSI, boot count, shown version, errors) is at
@@ -132,7 +138,9 @@ battery.
    Pillow RGB image (see `dashboard` for the pattern — data via
    `datasources.py` cached fetchers, degrade gracefully).
 2. Add it to the `SCREENS` dict.
-3. It appears in the control pane's screen picker. Check it in the
+3. It appears in the control pane's Test patterns picker; to make it a
+   main screen, add it to `MAIN_SCREENS` and the switcher in
+   `static/index.html`. Check it in the
    preview — six inks is not many; bold shapes and dithered mid-tones work,
    subtle gradients don't.
 
