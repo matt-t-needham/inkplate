@@ -19,8 +19,9 @@ import json
 import logging
 import os
 import re
+import threading
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import httpx
@@ -588,9 +589,10 @@ def _too_faint(img: bytes) -> bool:
 
 
 def _try_collection(coll: dict, common: str, latin: str, slot: int,
-                    vetoed=frozenset()) -> dict | None:
+                    vetoed=frozenset(), img_path: Path | None = None) -> dict | None:
     """One collection attempt: search, filter, deterministic pick, download.
-    `vetoed` holds Commons file titles banned from the pane.
+    `vetoed` holds Commons file titles banned from the pane. The image is
+    saved to `img_path` (default: the panel's own, ANIMAL_IMG).
     Returns the animal data dict (sans native/common) or None if unusable."""
     import re
 
@@ -711,9 +713,10 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int,
         log.info("skipped faint or blank plate %s", pick["title"])
     else:
         return None
-    tmp = _cache_dir() / (ANIMAL_IMG + ".tmp")
+    img_path = img_path or _cache_dir() / ANIMAL_IMG
+    tmp = img_path.with_name(img_path.name + ".tmp")
     tmp.write_bytes(img)
-    os.replace(tmp, _cache_dir() / ANIMAL_IMG)
+    os.replace(tmp, img_path)
 
     title = pick["title"].removeprefix("File:")
     title = re.sub(r"\.(tiff?|jpe?g|png)$", "", title, flags=re.I)
@@ -759,7 +762,7 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int,
     else:
         artist = coll["artist"]   # no Artist field at all: the corpus's own
     return {
-        "path": str(_cache_dir() / ANIMAL_IMG),
+        "path": str(img_path),
         "file": pick["title"],  # identity for the pane's image veto
         "sci_name": sci_name,
         "year": year,
@@ -776,8 +779,27 @@ def cached_animal() -> dict | None:
     return meta.get("data") if meta else None
 
 
+def _resolve(slot: int, vetoed, img_path: Path) -> dict | None:
+    """The animal for a content slot, tried across its eligible collections in rotation until one has a usable plate."""
+    common, latin, native, kind = ANIMALS[slot % len(ANIMALS)]
+    eligible = [c for c in COLLECTIONS
+                if (c["kinds"] is None or kind in c["kinds"])
+                and (not c.get("new_world") or _could_be_new_world(native))]
+    rot = slot % len(eligible) if eligible else 0
+    for coll in eligible[rot:] + eligible[:rot]:
+        try:
+            data = _try_collection(coll, common, latin, slot, vetoed, img_path)
+        except Exception as e:
+            log.warning("animal fetch via %s failed: %s", coll["key"], e)
+            data = None
+        if data:
+            data.update({"common_name": common, "native": native, "slot": slot})
+            return data
+    return None
+
+
 def get_animal(day: date | None = None, offset: int = 0,
-               period_days: int = 1, vetoed=()) -> dict | None:
+               period_days: int = 1, vetoed=(), keep=()) -> dict | None:
     """The current engraving, as a data dict for the caption: common/sci name,
     year, artist + artist's place (collection defaults when the file is
     silent), the animal's native range.
@@ -788,6 +810,7 @@ def get_animal(day: date | None = None, offset: int = 0,
     changes (1 = daily); `offset` advances the sequence — the pane's "next
     animal" button. `vetoed` holds Commons file titles: a vetoed image is
     never picked again, and the same animal is drawn from its next plate.
+    `keep` holds Commons file titles the user has reviewed or adjusted.
     """
     day = day or date.today()
     slot = slot_for(day, period_days, offset)
@@ -801,26 +824,16 @@ def get_animal(day: date | None = None, offset: int = 0,
             and (_cache_dir() / ANIMAL_IMG).exists()):
         return meta["data"]
 
-    common, latin, native, kind = ANIMALS[slot % len(ANIMALS)]
-    eligible = [c for c in COLLECTIONS
-                if (c["kinds"] is None or kind in c["kinds"])
-                and (not c.get("new_world") or _could_be_new_world(native))]
-    rot = slot % len(eligible) if eligible else 0
-    for coll in eligible[rot:] + eligible[:rot]:
-        try:
-            data = _try_collection(coll, common, latin, slot, vetoed)
-        except Exception as e:
-            log.warning("animal fetch via %s failed: %s", coll["key"], e)
-            data = None
-        if data:
-            data.update({"common_name": common, "native": native,
-                         "slot": slot, "for_date": day.isoformat()})
-            _cache_write("animal.json", {"fetched_at": time.time(), "data": data})
-            # The only record of what hung on the wall on a given day.
-            log.info("animal for %s: %s via %s: %s", day.isoformat(), common,
-                     coll["key"], data["file"])
-            return data
+    data = _take_upcoming(slot, vetoed, set(keep)) or _resolve(slot, vetoed, _cache_dir() / ANIMAL_IMG)
+    if data:
+        data["for_date"] = day.isoformat()
+        _cache_write("animal.json", {"fetched_at": time.time(), "data": data})
+        # The only record of what hung on the wall on a given day.
+        log.info("animal for %s: %s via %s: %s", day.isoformat(), data["common_name"],
+                 data["collection"], data["file"])
+        return data
 
+    common = ANIMALS[slot % len(ANIMALS)][0]
     _log_event(f"animal illustration fetch failed for {common} in all collections")
     if (meta and (_cache_dir() / ANIMAL_IMG).exists()
             and meta["data"].get("file") not in vetoed):
@@ -829,4 +842,138 @@ def get_animal(day: date | None = None, offset: int = 0,
         return meta["data"]  # yesterday's beast beats no beast (unless vetoed)
     log.error("animal illustration fetch failed for %s in all collections, "
               "no illustration to show", common)
+    return None
+
+
+# ── upcoming animals (the review page) ───────────────────────────────────────
+# Upcoming slots are resolved ahead of time into cache/upcoming/<slot>.json +
+# <slot>.jpg, beside — never over — the panel's own animal.json/animal.jpg.
+UPCOMING_RETRY_S = 6 * 3600
+_upcoming_lock = threading.Lock()
+
+
+def _upcoming_dir() -> Path:
+    d = _cache_dir() / "upcoming"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _stored_upcoming(slot: int, vetoed) -> dict | None:
+    """The stored upcoming animal for a slot, if it is still usable."""
+    meta = _cache_read(f"upcoming/{slot}.json")
+    d = meta.get("data") if meta else None
+    if d and d.get("file") not in vetoed and Path(d.get("path", "")).exists():
+        return d
+    return None
+
+
+def _gave_up_recently(slot: int) -> bool:
+    meta = _cache_read(f"upcoming/{slot}.json")
+    return bool(meta and meta.get("data") is None
+                and time.time() - meta.get("fetched_at", 0) < UPCOMING_RETRY_S)
+
+
+def _take_upcoming(slot: int, vetoed, keep) -> dict | None:
+    """Copied into the panel's cache; None unless its file is in `keep` and the slot still maps to that animal."""
+    d = _stored_upcoming(slot, vetoed)
+    if (not d or d.get("file") not in keep
+            or d.get("common_name") != ANIMALS[slot % len(ANIMALS)][0]):
+        return None
+    dest = _cache_dir() / ANIMAL_IMG
+    tmp = dest.with_name(dest.name + ".tmp")
+    try:
+        tmp.write_bytes(Path(d["path"]).read_bytes())
+        os.replace(tmp, dest)
+    except OSError as e:
+        log.warning("could not take the upcoming animal for slot %d, "
+                    "fetching afresh: %s", slot, e)
+        return None
+    return {**d, "path": str(dest)}
+
+
+def _fetch_upcoming(slot: int, vetoed) -> dict | None:
+    """The slot's upcoming animal, resolved and stored on first sight; a slot
+    that found nothing is retried only after UPCOMING_RETRY_S, so a dead
+    upstream isn't hammered by the review page."""
+    d = _stored_upcoming(slot, vetoed)
+    if d or _gave_up_recently(slot):
+        return d
+    d = _resolve(slot, vetoed, _upcoming_dir() / f"{slot}.jpg")
+    _cache_write(f"upcoming/{slot}.json", {"fetched_at": time.time(), "data": d})
+    if d is None:
+        log.warning("no upcoming animal found for slot %d (%s) in any collection",
+                    slot, ANIMALS[slot % len(ANIMALS)][0])
+    return d
+
+
+def _upcoming_slots(start: date, days: int, offset: int, period_days: int) -> dict[int, list[str]]:
+    slots: dict[int, list[str]] = {}
+    for i in range(max(0, days)):
+        d = start + timedelta(days=i)
+        slots.setdefault(slot_for(d, period_days, offset), []).append(d.isoformat())
+    return slots
+
+
+def _on_panel(current: dict | None, slot: int, vetoed) -> bool:
+    return bool(current and current.get("slot") == slot and current.get("file")
+                and current["file"] not in vetoed
+                and (_cache_dir() / ANIMAL_IMG).exists())
+
+
+def upcoming_animals(start: date, days: int, offset: int = 0, period_days: int = 1,
+                     vetoed=()) -> list[dict]:
+    """The animals from `start` for `days` days, one {"slot", "dates", "animal",
+    "pending"} per slot, read from the cache only (no lock, no network)."""
+    vetoed = set(vetoed)
+    current = cached_animal()
+    out = []
+    for slot, dates in _upcoming_slots(start, days, offset, period_days).items():
+        pending = False
+        if _on_panel(current, slot, vetoed):
+            animal = current
+        else:
+            animal = _stored_upcoming(slot, vetoed)
+            pending = animal is None and not _gave_up_recently(slot)
+        out.append({"slot": slot, "dates": dates, "animal": animal, "pending": pending})
+    return out
+
+
+def fetch_upcoming(start: date, days: int, offset: int = 0, period_days: int = 1,
+                   vetoed=()) -> None:
+    """Resolve the missing slots one at a time (network-bound: call off the
+    event loop) and prune passed slots."""
+    vetoed = set(vetoed)
+    slots = _upcoming_slots(start, days, offset, period_days)
+    current = cached_animal()
+    with _upcoming_lock:
+        for slot in slots:
+            if not _on_panel(current, slot, vetoed):
+                _fetch_upcoming(slot, vetoed)
+        if slots:
+            _prune_upcoming(min(slots))
+
+
+def _prune_upcoming(before: int) -> None:
+    for p in _upcoming_dir().iterdir():
+        try:
+            slot = int(p.name.split(".")[0])
+        except ValueError:
+            continue
+        if slot < before:
+            try:
+                p.unlink()
+            except OSError as e:
+                log.warning("could not prune upcoming file %s: %s", p.name, e)
+
+
+def find_animal(file: str) -> dict | None:
+    """An animal the panel shows now or the review page has upcoming, by Commons file title."""
+    current = cached_animal()
+    if current and current.get("file") == file and Path(current.get("path", "")).exists():
+        return current
+    for p in sorted(_upcoming_dir().glob("*.json")):
+        d = _cache_read(f"upcoming/{p.name}")
+        d = d.get("data") if d else None
+        if d and d.get("file") == file and Path(d.get("path", "")).exists():
+            return d
     return None

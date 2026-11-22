@@ -18,7 +18,9 @@ import screens
 
 log = logging.getLogger("inkplate.state")
 
-_lock = threading.Lock()
+# Re-entrant: update_config/mutate hold it across load-change-save and
+# save_config takes it again inside.
+_lock = threading.RLock()
 
 ROTATIONS = (0, 90, 180, 270)
 
@@ -63,6 +65,14 @@ DEFAULT_CONFIG = {
     # Per-image rotation (clockwise degrees, keyed by Commons file title)
     # for plates scanned sideways. Only non-zero entries are kept.
     "image_rotations": {},
+    # Per-image placement inside an art box (pane Adjust / review page):
+    # {Commons file title: {art layout: {"x", "y", "scale"}}}, the layout
+    # being a screens.art_box key ("landscape", "hero", ...); see
+    # screens.normalize_placement. Only non-automatic entries are kept.
+    "image_placements": {},
+    # Commons file titles marked reviewed on the review page: a reviewed
+    # upcoming image is the one that hangs on its day.
+    "reviewed_images": [],
     # Monotonic content version. The device compares this against the version
     # it stored in RTC memory to decide whether to redraw (a redraw costs ~20s
     # and visible flashing, so unchanged content must never trigger one).
@@ -98,6 +108,9 @@ def load_config() -> dict:
         cfg["rotation"] = 0
     if not isinstance(cfg.get("image_rotations"), dict):
         cfg["image_rotations"] = {}
+    cfg["image_placements"] = _clean_placements(cfg.get("image_placements"))
+    if not isinstance(cfg.get("reviewed_images"), list):
+        cfg["reviewed_images"] = []
     if cfg["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
         cfg["portrait_layout"] = screens.DEFAULT_PORTRAIT_LAYOUT
     try:
@@ -106,6 +119,33 @@ def load_config() -> dict:
         log.warning("refresh_anchor %r is not HH:MM, falling back", cfg["refresh_anchor"])
         cfg["refresh_anchor"] = config.DEFAULT_REFRESH_ANCHOR
     return cfg
+
+
+def _clean_placements(v) -> dict:
+    """image_placements as read from disk, with any malformed entry (not a
+    {file: {layout: placement}} mapping, or a placement that doesn't
+    validate) dropped and logged."""
+    if not isinstance(v, dict):
+        if v is not None:
+            log.warning("image_placements is not a mapping, dropping it")
+        return {}
+    out = {}
+    for f, per in v.items():
+        if not isinstance(per, dict):
+            log.warning("dropping malformed placements for %s", f)
+            continue
+        kept = {}
+        for lay, p in per.items():
+            try:
+                q = screens.normalize_placement(p)
+            except ValueError as e:
+                log.warning("dropping placement for %s in %s: %s", f, lay, e)
+                continue
+            if q:
+                kept[lay] = q
+        if kept:
+            out[f] = kept
+    return out
 
 
 def parse_anchor(v) -> str:
@@ -126,7 +166,18 @@ def save_config(cfg: dict) -> None:
 
 def update_config(**changes) -> dict:
     """Validated read-modify-write. Returns the new config."""
-    cfg = load_config()
+    with _lock:
+        return _apply(load_config(), changes)
+
+
+def mutate(fn) -> dict:
+    """update_config where the changes depend on the current config; fn runs under the lock."""
+    with _lock:
+        cfg = load_config()
+        return _apply(cfg, fn(cfg))
+
+
+def _apply(cfg: dict, changes: dict) -> dict:
     if "refresh_minutes" in changes:
         v = int(changes["refresh_minutes"])
         cfg["refresh_minutes"] = max(config.MIN_REFRESH_MINUTES, min(config.MAX_REFRESH_MINUTES, v))
@@ -197,15 +248,34 @@ def update_config(**changes) -> dict:
             if deg:
                 rots[str(k)] = deg
         cfg["image_rotations"] = rots
+    if "image_placements" in changes:
+        v = changes["image_placements"]
+        if not isinstance(v, dict):
+            raise TypeError("image_placements must be a mapping")
+        places = {}
+        for f, per in v.items():
+            if not isinstance(per, dict):
+                raise TypeError("image_placements values must map art layouts to placements")
+            per = {str(lay): q for lay, p in per.items()
+                   if (q := screens.normalize_placement(p))}
+            if per:
+                places[str(f)] = per
+        cfg["image_placements"] = places
+    if "reviewed_images" in changes:
+        v = changes["reviewed_images"]
+        if not isinstance(v, list):
+            raise TypeError("reviewed_images must be a list")
+        cfg["reviewed_images"] = sorted({str(n) for n in v})
     save_config(cfg)
     return cfg
 
 
 def bump_version() -> dict:
-    cfg = load_config()
-    cfg["image_version"] += 1
-    save_config(cfg)
-    return cfg
+    with _lock:
+        cfg = load_config()
+        cfg["image_version"] += 1
+        save_config(cfg)
+        return cfg
 
 
 # ── ndjson logs ───────────────────────────────────────────────────────────────
@@ -244,7 +314,7 @@ PROBLEM_EVENT_KINDS = {"error", "device_error"}
 
 def log_event(kind: str, message: str, **extra) -> None:
     """Server-side event trail (renders, config changes, device errors) —
-    shown in the control pane so debugging doesn't require shell access.
+    served at /api/events so debugging doesn't require shell access.
     Problem kinds aren't echoed to the log: their callers log them at
     WARNING/ERROR with the detail, and an INFO echo would put a failure in
     app.log under the wrong level."""

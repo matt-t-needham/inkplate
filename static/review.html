@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Review prints · inkplate</title>
+<link rel="stylesheet" href="https://bix.computer/bix.css">
+<link rel="icon" type="image/svg+xml" href="https://bix.computer/favicon.svg">
+<style>
+  :root { --tap: 44px; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100dvh; overflow: hidden; }
+  body {
+    background: var(--bix-bg, #1e1e2e); color: var(--bix-text, #cdd6f4);
+    font: 15px/1.45 var(--bix-sans, "Helvetica Neue", Helvetica, Arial, sans-serif);
+    display: flex; flex-direction: column;
+  }
+  header {
+    flex: none; padding: calc(env(safe-area-inset-top) + 14px) 16px 12px;
+    border-bottom: 1px solid var(--bix-border, #313244);
+  }
+  h1 { font-weight: 300; letter-spacing: -.035em; line-height: 1.08; font-size: 1.9rem;
+       margin: 8px 0 4px; }
+  .lede { margin: 0 0 12px; color: var(--bix-text-soft, #a6adc8); font-size: .9rem; max-width: 60ch; }
+  .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .counts { font-family: var(--bix-mono, ui-monospace, Menlo, monospace); font-size: .85rem;
+            color: var(--bix-text-soft, #a6adc8); font-variant-numeric: tabular-nums; }
+  .counts b { color: var(--bix-text, #cdd6f4); font-weight: 500; }
+  .bar label { display: flex; align-items: center; gap: 8px; min-height: var(--tap);
+               color: var(--bix-text-soft, #a6adc8); font-size: .9rem; }
+  .bar input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--bix-accent, #fab387); }
+  .bar select { font-size: 16px; min-height: var(--tap); padding: 0 10px; border-radius: 8px;
+    background: var(--bix-surface, #313244); color: var(--bix-text, #cdd6f4);
+    border: 1px solid var(--bix-border-strong, #45475a); }
+
+  main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+         padding: 14px 16px calc(env(safe-area-inset-bottom) + 40px); }
+  .list { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+
+  .item { border: 1px solid var(--bix-border, #313244); border-radius: 12px;
+          background: var(--bix-bg-sunken, #181825); padding: 14px; }
+  .item.busy { opacity: .55; pointer-events: none; }
+  .when { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .name { font-size: 1.15rem; font-weight: 400; margin: 0; }
+  .sub { color: var(--bix-text-soft, #a6adc8); font-size: .88rem; }
+  .file { font-family: var(--bix-mono, ui-monospace, Menlo, monospace); font-size: .72rem;
+          color: var(--bix-text-faint, #6c7086); word-break: break-all; margin-top: 4px; }
+
+  /* Reviewed or not: a filled dot vs a hollow ring, always with words. */
+  .mark { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem;
+          color: var(--bix-text-soft, #a6adc8); }
+  .mark::before { content: ""; width: 10px; height: 10px; border-radius: 50%;
+                  border: 1.5px solid currentColor; }
+  .mark.done { color: var(--bix-text, #cdd6f4); }
+  .mark.done::before { background: currentColor; }
+
+  .body { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+  .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .acts button { min-height: var(--tap); padding: 0 14px; border-radius: 8px; font: inherit;
+    font-size: 14px; cursor: pointer; background: none; color: var(--bix-text, #cdd6f4);
+    border: 1px solid var(--bix-border-strong, #45475a); }
+  .acts button.veto { color: var(--bix-danger, #f38ba8); border-color: var(--bix-danger, #f38ba8); }
+  .acts button:disabled { opacity: .45; cursor: default; }
+  .missing, .pending { color: var(--bix-text-soft, #a6adc8); font-size: .9rem; margin-top: 8px; }
+  .empty { text-align: center; color: var(--bix-text-muted, #7f849c); padding: 48px 16px; }
+  .toast { position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 16px);
+    max-width: 640px; margin: 0 auto; background: var(--bix-surface, #313244);
+    border: 1px solid var(--bix-border-strong, #45475a); border-radius: 10px; padding: 12px 14px;
+    font-size: .9rem; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .toast.on { opacity: 1; }
+  .toast.bad { border-color: var(--bix-danger, #f38ba8); }
+
+  @media (min-width: 900px) {
+    header { padding-left: 32px; padding-right: 32px; }
+    main { padding-left: 32px; padding-right: 32px; }
+    .body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bix-site"><a href="./">inkplate</a><span class="sep">/</span>review</div>
+  <h1>Upcoming prints<i class="bix-dot">.</i></h1>
+  <p class="lede">The prints the panel will show, in the order they will hang. Move, scale,
+    rotate or veto each one, then mark it reviewed.</p>
+  <div class="bar">
+    <span class="counts" id="counts">loading</span>
+    <select id="days" aria-label="How far ahead">
+      <option value="7">Next 7 days</option>
+      <option value="14" selected>Next 14 days</option>
+      <option value="28">Next 28 days</option>
+    </select>
+    <label><input type="checkbox" id="hide-done"> Hide reviewed</label>
+  </div>
+</header>
+<main id="main">
+  <div class="list" id="list"><div class="empty">Looking ahead. The first load fetches each
+    upcoming print from Wikimedia Commons and can take a minute.</div></div>
+</main>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="placement.js"></script>
+<script>
+// All URLs are relative: this page is also served under a path prefix.
+const $ = id => document.getElementById(id);
+window.addEventListener('error', e => {
+  toast('Page error: ' + String(e.message || e.error), true);
+});
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+
+let items = [];
+let artLayout = null;            // {key, name}: the layout the panel draws now
+const mounted = new Map();   // file → Placement controller
+
+function toast(m, bad) {
+  const t = $('toast'); t.textContent = m;
+  t.className = 'toast on' + (bad ? ' bad' : '');
+  clearTimeout(t._t); t._t = setTimeout(() => t.className = 'toast', 3500);
+}
+
+function fmtDay(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString(undefined, {weekday: 'short', day: 'numeric', month: 'short'});
+}
+function fmtDates(ds) {
+  return ds.length === 1 ? fmtDay(ds[0]) : fmtDay(ds[0]) + ' to ' + fmtDay(ds[ds.length - 1]);
+}
+
+function drawCounts() {
+  const animals = items.filter(it => it.animal);
+  const done = animals.filter(it => it.animal.reviewed).length;
+  const fetching = items.filter(it => it.pending).length;
+  $('counts').innerHTML = `<b>${done}</b> of <b>${animals.length}</b> reviewed · ` +
+                          `<b>${animals.length - done}</b> left` +
+                          (fetching ? ` · <b>${fetching}</b> fetching` : '');
+}
+
+function subLine(a) {
+  return [a.sci_name, a.year, a.artist, a.rotation ? 'turned ' + a.rotation + '°' : null]
+    .filter(Boolean).join(' · ');
+}
+function markHtml(a) {
+  return `<span class="mark ${a.reviewed ? 'done' : ''}">${a.reviewed ? 'Reviewed' : 'To review'}</span>`;
+}
+
+// Each preview is a server render, so only draw the ones near the viewport.
+const io = new IntersectionObserver(es => {
+  for (const e of es) {
+    if (!e.isIntersecting) continue;
+    io.unobserve(e.target);
+    const it = items.find(i => i.animal && i.animal.file === e.target.dataset.file);
+    if (!it || mounted.has(it.animal.file)) continue;
+    mounted.set(it.animal.file, Placement.mount(e.target, {
+      file: it.animal.file, layout: artLayout.key, layoutName: artLayout.name,
+      placement: it.animal.placements[artLayout.key],
+      onSaved: a => { it.animal = a; },
+    }));
+  }
+}, {root: $('main'), rootMargin: '600px 0px'});
+
+function itemHtml(it, i) {
+  const when = `<div class="when"><span class="bix-label">${esc(fmtDates(it.dates))}</span>` +
+    (it.on_panel ? '<span class="bix-label">on the panel now</span>' : '') +
+    (it.animal ? markHtml(it.animal) : '') + '</div>';
+  if (it.pending) {
+    return `<article class="item" data-i="${i}">${when}<div class="pending">Fetching… The first
+      look at a print comes from Wikimedia Commons and can take a minute.</div></article>`;
+  }
+  if (!it.animal) {
+    return `<article class="item" data-i="${i}">${when}<div class="missing">No usable print was found for
+      this day in any collection. The panel keeps the previous one; it is looked up again later.</div></article>`;
+  }
+  const a = it.animal;
+  return `<article class="item" data-i="${i}">${when}
+    <h2 class="name">${esc(a.common_name)}</h2>
+    <div class="sub">${esc(subLine(a))}</div>
+    <div class="file">${esc(a.file)}</div>
+    <div class="body">
+      <div class="adj-mount" data-file="${esc(a.file)}"></div>
+      <div class="acts">
+        <button type="button" data-act="reviewed">${a.reviewed ? 'Mark not reviewed' : 'Mark reviewed'}</button>
+        <button type="button" data-act="rotate" title="Turn the plate a quarter clockwise, for a scan bound in sideways">Rotate</button>
+        <button type="button" class="veto" data-act="veto">Veto image</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+const hidden = it => $('hide-done').checked && it.animal && it.animal.reviewed;
+
+function draw() {
+  for (const c of mounted.values()) c.destroy();
+  mounted.clear();
+  const shown = items.map((it, i) => [it, i]).filter(([it]) => !hidden(it));
+  $('list').innerHTML = shown.length ? shown.map(([it, i]) => itemHtml(it, i)).join('')
+    : `<div class="empty">${items.length ? 'Everything in this stretch is reviewed.'
+                                         : 'Nothing upcoming.'}</div>`;
+  $('list').querySelectorAll('.adj-mount').forEach(el => io.observe(el));
+  drawCounts();
+}
+
+// Slots not fetched yet come back pending and are fetched in the background;
+// re-poll until none are left, swapping in only the cards that resolved so
+// an open adjustment elsewhere on the page is left alone.
+const POLL_MS = 4000;
+let pollTimer = null;
+
+async function fetchReview() {
+  const r = await fetch('api/review?days=' + encodeURIComponent($('days').value));
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+  return j;
+}
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (items.some(it => it.pending)) pollTimer = setTimeout(poll, POLL_MS);
+}
+
+async function poll() {
+  let j;
+  try { j = await fetchReview(); }
+  catch (e) { toast('Could not check for fetched prints: ' + e.message, true); schedulePoll(); return; }
+  const fresh = j.items;
+  if (j.art_layout.key !== artLayout.key || fresh.length !== items.length ||
+      fresh.some((n, i) => n.dates[0] !== items[i].dates[0])) {
+    items = fresh; artLayout = j.art_layout; draw();
+  } else {
+    fresh.forEach((n, i) => {
+      if (!items[i].pending || n.pending) return;
+      items[i] = n;
+      const card = $('list').querySelector(`.item[data-i="${i}"]`);
+      if (!card) return;
+      if (hidden(n)) { card.remove(); return; }
+      card.outerHTML = itemHtml(n, i);
+      const mount = $('list').querySelector(`.item[data-i="${i}"] .adj-mount`);
+      if (mount) io.observe(mount);
+    });
+    drawCounts();
+  }
+  schedulePoll();
+}
+
+async function load() {
+  clearTimeout(pollTimer);
+  try {
+    const j = await fetchReview();
+    items = j.items; artLayout = j.art_layout;
+    draw();
+    schedulePoll();
+  } catch (e) {
+    $('list').innerHTML = `<div class="empty">Could not load the upcoming prints: ${esc(e.message)}</div>`;
+    $('counts').textContent = 'not loaded';
+  }
+}
+
+$('list').addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const card = btn.closest('.item');
+  const it = items[+card.dataset.i];
+  const a = it.animal;
+  card.classList.add('busy');
+  try {
+    if (btn.dataset.act === 'reviewed') {
+      const j = await Placement.postJSON('api/mark-reviewed', {file: a.file, reviewed: !a.reviewed});
+      it.animal = j.animal;
+      if (hidden(it)) { draw(); return; }
+      // Redraw just this card's header and button; keep its preview.
+      card.querySelector('.mark').outerHTML = markHtml(it.animal);
+      btn.textContent = it.animal.reviewed ? 'Mark not reviewed' : 'Mark reviewed';
+      drawCounts();
+    } else if (btn.dataset.act === 'rotate') {
+      const j = await Placement.postJSON('api/rotate', {file: a.file, degrees: 90});
+      it.animal = j.animal;
+      card.querySelector('.sub').textContent = subLine(it.animal);
+      const c = mounted.get(a.file);
+      if (c) c.reload();
+    } else if (btn.dataset.act === 'veto') {
+      if (!confirm(`Veto ${a.common_name}'s image? It's removed from rotation for good, ` +
+                   `and another plate takes its day.`)) return;
+      await Placement.postJSON('api/veto', {what: 'animal', file: a.file});
+      toast('Vetoed. Finding a replacement plate…');
+      await load();
+    }
+  } catch (err) {
+    toast(btn.textContent.trim() + ' failed: ' + err.message, true);
+  } finally {
+    card.classList.remove('busy');
+  }
+});
+
+$('hide-done').addEventListener('change', draw);
+$('days').addEventListener('change', () => {
+  $('list').innerHTML = '<div class="empty">Looking ahead…</div>';
+  load();
+});
+try {   // remembered per browser; a convenience only
+  if (localStorage.getItem('inkplate-review-hide-done') === '1') $('hide-done').checked = true;
+  $('hide-done').addEventListener('change', () =>
+    localStorage.setItem('inkplate-review-hide-done', $('hide-done').checked ? '1' : '0'));
+} catch (err) { console.warn('localStorage unavailable; Hide reviewed is not remembered', err); }
+load();
+</script>
+</body>
+</html>

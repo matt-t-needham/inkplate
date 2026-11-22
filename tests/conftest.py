@@ -60,6 +60,6 @@ def fake_data(tmp_path, monkeypatch):
                    "native": "the Northern Hemisphere", "for_date": "2026-09-17"}
 
     monkeypatch.setattr(datasources, "get_weather", lambda lat, lon: FAKE_WEATHER)
-    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(): fake_animal)
+    monkeypatch.setattr(datasources, "get_animal", lambda day=None, offset=0, period_days=1, vetoed=(), keep=(): fake_animal)
     monkeypatch.setattr(datasources, "get_snow", lambda lat, lon: FAKE_SNOW)
     return {"weather": FAKE_WEATHER, "animal": fake_animal, "snow": FAKE_SNOW}

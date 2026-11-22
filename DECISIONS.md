@@ -189,6 +189,45 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 25. Per-image placement and a review page (2026-11-21)
+The automatic crop gets most plates right but not all (a mount card, a
+figure that wants to sit lower). **Placement** is a per-image correction,
+**kept per layout**: config `image_placements[file][layout] = {x, y,
+scale}`, where `layout` is the art box it was made in (`landscape`, `hero`,
+`stack`: `screens.ART_LAYOUTS`). A nudge that suits the hero's centred box
+is wrong for a bleed, so each art box keeps its own; the key is a plain
+string the caller of `art_box`/`_draw_art` names, so a later screen (the
+planner) adds its own. It is applied *after* the automatic trim/crop/fit,
+inside the same art box (`screens._place`). Stored values are capped and the
+drawn subject centre is kept inside the box, so a print can't leave its
+area. No entry for the layout being drawn means the automatic fit, pixel for
+pixel. Malformed entries are dropped on load (nothing was deployed with the
+earlier one-placement-per-image shape, so there is no migration).
+
+The pane's **Adjust** and the **review page** (`/review`) share
+`static/placement.js` and adjust the placement for the layout the panel is
+using now (named under the control). Saving is automatic: a released drag
+or slider saves, arrow-key nudges save after a 500 ms pause, *Reset to
+automatic* saves at once; the status reads Saving… / Saved / the error. Its
+picture is always a server render (`/api/animal-preview.png?layout=…`: the
+dashboard's own `art_box` + `_draw_art`, dithered to the six inks), never a
+CSS imitation — CSS only nudges the last render while a finger is down.
+
+The review page lists the next 14 days' prints. They come from the same
+slots (`slot_for`) and the same selection (`datasources._resolve`) as the
+panel; upcoming slots are fetched into `cache/upcoming/<slot>.*`, never over
+the panel's own `animal.*`. `/api/review` answers at once from that cache and
+fetches missing slots in the background (a cold 14-day fetch can outlast
+Cloudflare's 100 s timeout); the page re-polls while any are pending.
+
+**When its day comes, the panel takes the upcoming print only if Matt
+touched it** — marked it reviewed, or saved a placement or rotation for it —
+and the slot still maps to that animal. So what was reviewed is what hangs
+even if Commons changes in between, but an untouched upcoming print is resolved afresh, so selection-filter fixes made meanwhile still
+apply to it. `reviewed_images` in config records what has been worked
+through. Old placements and reviewed marks are not pruned: one short entry
+per image, a few hundred a year at most.
+
 ## 24. Bad plates and a beheaded lark: tighter validation, no-cut zoom (2026-10-25)
 
 Matt reported a run of bad images and a poorly cut top. Nothing recorded which

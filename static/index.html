@@ -10,7 +10,7 @@
   :root {
     --bg:#1e1e2e; --surface0:#313244; --surface1:#45475a;
     --text:#cdd6f4; --subtext:#a6adc8;
-    --yellow:#f9e2af; --blue:#89b4fa; --green:#a6e3a1; --red:#f38ba8; --mauve:#cba6f7;
+    --yellow:#f9e2af; --green:#a6e3a1; --red:#f38ba8; --mauve:#cba6f7;
   }
   * { box-sizing:border-box; }
   body {
@@ -54,14 +54,7 @@
     aspect-ratio:3/4; width:auto; max-width:100%; height:min(78vh, 900px); margin:0 auto;
   }
   .preview-bar { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
-  .seg { display:flex; border:1px solid var(--surface1); border-radius:7px; overflow:hidden; }
-  .seg button {
-    background:none; border:none; color:var(--subtext); padding:6px 12px; cursor:pointer;
-    font:inherit; font-size:13px;
-  }
-  .seg button.active { background:var(--surface1); color:var(--text); }
   .meta-line { color:var(--subtext); font-size:12px; margin-top:8px; }
-  .meta-line b { color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
 
   button.primary {
     background:var(--mauve); color:#11111b; border:none; border-radius:7px;
@@ -72,7 +65,6 @@
     background:none; border:1px solid var(--surface1); color:var(--text);
     border-radius:7px; padding:7px 14px; font:inherit; cursor:pointer;
   }
-  .push-note { color:var(--subtext); font-size:12px; }
 
   /* Config form */
   .field { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:11px; }
@@ -91,13 +83,7 @@
   .stat { background:var(--bg); border-radius:7px; padding:8px 10px; }
   .stat .k { color:var(--subtext); font-size:11px; }
   .stat .v { font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
-  .stat .v.blue { color:var(--blue); } .stat .v.green { color:var(--green); }
-  .stat .v.yellow { color:var(--yellow); } .stat .v.red { color:var(--red); }
-
-  table { width:100%; border-collapse:collapse; font-size:12px; }
-  th { text-align:left; color:var(--subtext); font-weight:500; padding:4px 6px; }
-  td { padding:4px 6px; border-top:1px solid var(--surface1); font-variant-numeric:tabular-nums; }
-  .empty { color:var(--subtext); font-size:13px; padding:6px 0; }
+  .stat .v.green { color:var(--green); } .stat .v.red { color:var(--red); }
 
   /* Now showing */
   .now-row { margin-bottom:14px; }
@@ -111,14 +97,6 @@
   }
   button.danger:disabled, button.ghost:disabled { opacity:.5; cursor:default; }
   .msg { font-size:12px; } .msg.ok { color:var(--green); } .msg.err { color:var(--red); }
-
-  /* Event log */
-  #events { display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto; }
-  .evt { display:flex; gap:8px; font-size:12px; align-items:baseline; }
-  .evt .ts { color:var(--subtext); white-space:nowrap; font-variant-numeric:tabular-nums; }
-  .evt .kind { flex-shrink:0; padding:0 6px; border-radius:5px; font-size:11px; background:var(--surface1); }
-  .evt .kind.render { color:var(--blue); } .evt .kind.config { color:var(--mauve); }
-  .evt .kind.error, .evt .kind.device_error { color:var(--red); }
 </style>
 </head>
 <body>
@@ -132,26 +110,14 @@
     <div class="card">
       <img id="preview-img" alt="dashboard preview">
       <div class="preview-bar">
-        <div class="seg" id="mode-seg">
-          <button data-mode="panel" class="active">panel sim</button>
-          <button data-mode="dithered">dithered</button>
-          <button data-mode="raw">raw</button>
-        </div>
         <button class="primary" id="btn-render">Render now → push</button>
         <button class="ghost" id="btn-cycle-animal">Next animal</button>
-        <span class="push-note">push bumps the version; the device redraws at its next wake</span>
       </div>
-      <div class="meta-line" id="render-meta">no render yet</div>
     </div>
 
     <div class="card">
-      <h2>Device check-ins</h2>
-      <div class="stats" id="dev-stats" style="margin-bottom:12px"></div>
-      <table>
-        <thead><tr><th>when</th><th>batt</th><th>rssi</th><th>boot#</th><th>ver</th><th>wake</th><th>ms</th><th>error</th></tr></thead>
-        <tbody id="checkin-rows"></tbody>
-      </table>
-      <div class="empty" id="checkin-empty" hidden>No check-ins yet — the device hasn't phoned home. Expected until it arrives and is flashed.</div>
+      <h2>Device</h2>
+      <div class="stats" id="dev-stats"></div>
     </div>
 
   </div>
@@ -165,8 +131,11 @@
         <div class="sub" id="now-animal-sub"></div>
         <div class="btn-row">
           <button class="ghost" id="btn-rotate-animal" title="Turn the plate a quarter clockwise — for a scan bound in sideways. Remembered for this image.">Rotate ↻</button>
+          <button class="ghost" id="btn-adjust-animal" aria-expanded="false" title="Move and scale the print within its own area. Remembered for this image.">Adjust</button>
           <button class="danger" id="btn-veto-animal">Veto image</button>
         </div>
+        <div id="adjust-box" hidden style="margin-top:12px"></div>
+        <div class="meta-line"><a href="review" style="color:var(--text)">Review upcoming prints</a></div>
       </div>
     </div>
 
@@ -196,28 +165,16 @@
         <button class="primary" id="btn-save">Save</button><span id="save-msg"></span>
       </div>
     </div>
-
-    <div class="card">
-      <h2>Server events</h2>
-      <div id="events"></div>
-      <div class="empty" id="events-empty" hidden>No events yet.</div>
-    </div>
   </div>
 </main>
 
+<script src="placement.js"></script>
 <script>
 // All URLs are relative on purpose: this page is served both at :3008/ and at
 // the metrics site under /inkplate/ — absolute paths would break the latter.
 const $ = id => document.getElementById(id);
-let previewMode = 'panel';
 let stateCache = null;
 
-function fmtTs(ts) {
-  if (!ts) return '—';
-  const d = new Date(ts * 1000);
-  return d.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' +
-         d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-}
 function ago(ts) {
   const s = Math.max(0, (Date.now()/1000) - ts);
   if (s < 90) return Math.round(s) + 's ago';
@@ -227,15 +184,8 @@ function ago(ts) {
 }
 
 function refreshPreviewImg() {
-  $('preview-img').src = 'api/preview.png?mode=' + previewMode + '&t=' + Date.now();
+  $('preview-img').src = 'api/preview.png?mode=panel&t=' + Date.now();
 }
-
-$('mode-seg').addEventListener('click', e => {
-  const btn = e.target.closest('button'); if (!btn) return;
-  previewMode = btn.dataset.mode;
-  document.querySelectorAll('#mode-seg button').forEach(b => b.classList.toggle('active', b === btn));
-  refreshPreviewImg();
-});
 
 $('btn-render').addEventListener('click', async () => {
   const btn = $('btn-render');
@@ -317,15 +267,45 @@ async function api(method, url, body) {
 }
 
 // ── Now showing: veto ──
-function renderNow(cur) {
+function renderNow(st) {
+  const cur = st.current;
   if (!cur) return;
   const a = cur.animal;
+  const layout = st.art_layout.key;
   $('now-animal').textContent = a ? a.common_name : 'none cached yet';
   $('now-animal-sub').textContent = a ? [a.sci_name, a.year, a.artist,
-    a.rotation ? 'turned ' + a.rotation + '°' : null].filter(Boolean).join(' · ') : '';
+    a.rotation ? 'turned ' + a.rotation + '°' : null,
+    a.placements[layout] ? 'adjusted' : null,
+  ].filter(Boolean).join(' · ') : '';
   $('btn-veto-animal').disabled = !(a && a.file);
   $('btn-rotate-animal').disabled = !(a && a.file);
+  $('btn-adjust-animal').disabled = !(a && a.file);
+  // The animal or the layout changed under an open Adjust (next animal,
+  // veto, panel rotation or portrait layout): close it.
+  if (adjuster && !(a && a.file === adjuster.file && layout === adjuster.layout)) closeAdjust();
 }
+
+// ── Now showing: adjust ──
+let adjuster = null;
+function closeAdjust() {
+  if (adjuster) adjuster.ctl.destroy();
+  adjuster = null;
+  $('adjust-box').hidden = true;
+  $('btn-adjust-animal').setAttribute('aria-expanded', 'false');
+}
+$('btn-adjust-animal').addEventListener('click', () => {
+  if (adjuster) { closeAdjust(); return; }
+  const a = stateCache && stateCache.current && stateCache.current.animal;
+  if (!a || !a.file) return;
+  const layout = stateCache.art_layout;
+  $('adjust-box').hidden = false;
+  $('btn-adjust-animal').setAttribute('aria-expanded', 'true');
+  adjuster = {file: a.file, layout: layout.key, ctl: Placement.mount($('adjust-box'), {
+    file: a.file, layout: layout.key, layoutName: layout.name,
+    placement: a.placements[layout.key],
+    onSaved: async () => { await loadState(); refreshPreviewImg(); },
+  })};
+});
 
 async function veto(what, btn) {
   if (!confirm(`Veto this image? It's removed from rotation for good.`)) return;
@@ -342,7 +322,10 @@ async function rotateAnimal(btn) {
   try {
     await api('POST', 'api/rotate', {degrees: 90});
   } catch (e) { alert('Rotate failed: ' + e.message); }
-  finally { btn.disabled = false; await loadState(); refreshPreviewImg(); }
+  finally {
+    btn.disabled = false; await loadState(); refreshPreviewImg();
+    if (adjuster) adjuster.ctl.reload();
+  }
 }
 $('btn-rotate-animal').addEventListener('click', e => rotateAnimal(e.target));
 
@@ -360,16 +343,9 @@ function renderDeviceBadge(st) {
 function renderState(st) {
   stateCache = st;
   renderDeviceBadge(st);
-  renderNow(st.current);
+  renderNow(st);
 
-  // render meta
-  const m = st.render;
-  const rot = m ? (m.rotation || 0) : st.config.rotation;
-  $('render-meta').innerHTML = m
-    ? `screen <b>${m.screen}</b> · version <b>${m.image_version}</b> · rendered <b>${fmtTs(m.rendered_at)}</b>` +
-      ` (${ago(m.rendered_at)}) · <b>${m.render_ms}ms</b> · ${m.width}×${m.height}` +
-      (rot ? ` · turned <b>${rot}°</b>` : '')
-    : 'no render yet';
+  const rot = st.render ? (st.render.rotation || 0) : st.config.rotation;
   $('preview-img').classList.toggle('portrait', rot === 90 || rot === 270);
 
   // config form — don't clobber fields the user is editing
@@ -404,39 +380,11 @@ function renderState(st) {
     const pct = st.battery_percent;
     stats.push(['Battery', pct != null ? `${pct}% · ${last.battery_voltage.toFixed(2)} V` : '—',
                 pct != null && pct <= 20 ? 'red' : 'green']);
-    stats.push(['Wi-Fi RSSI', last.rssi != null ? last.rssi + ' dBm' : '—', 'blue']);
-    stats.push(['Boot count', last.boot_count ?? '—', '']);
-    stats.push(['Shown version', last.shown_version ?? '—',
-                st.render && last.shown_version === st.render.image_version ? 'green' : 'yellow']);
   } else {
     stats.push(['Last seen', 'never', '']);
-    stats.push(['Server version', st.render ? st.render.image_version : st.config.image_version, 'blue']);
   }
   $('dev-stats').innerHTML = stats.map(([k, v, c]) =>
     `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
-
-  // checkin table
-  const rows = st.checkins || [];
-  $('checkin-empty').hidden = rows.length > 0;
-  $('checkin-rows').innerHTML = rows.map(c => `<tr>
-    <td>${fmtTs(c.ts)}</td>
-    <td>${c.battery_voltage != null ? c.battery_voltage.toFixed(2) : '—'}</td>
-    <td>${c.rssi ?? '—'}</td>
-    <td>${c.boot_count ?? '—'}</td>
-    <td>${c.shown_version ?? '—'}</td>
-    <td>${c.wake_reason ?? '—'}</td>
-    <td>${c.duration_ms ?? '—'}</td>
-    <td style="color:var(--red)">${c.error ? String(c.error).slice(0,80) : ''}</td>
-  </tr>`).join('');
-
-  // events
-  const evts = st.events || [];
-  $('events-empty').hidden = evts.length > 0;
-  $('events').innerHTML = evts.map(e => `<div class="evt">
-    <span class="ts">${fmtTs(e.ts)}</span>
-    <span class="kind ${e.kind}">${e.kind}</span>
-    <span>${(e.message || '').replace(/</g, '&lt;')}</span>
-  </div>`).join('');
 }
 
 async function loadState() {
