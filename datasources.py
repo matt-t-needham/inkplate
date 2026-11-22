@@ -534,6 +534,9 @@ NAMESAKES = {
     "lion": r"(?i)chien[- ]lion|lion[- ]dog",
     # Catesby's turkey vulture: "Buteo species Gallinae Pavonis".
     "buzzard": r"(?i)turkey buzzard|Gallinae Pavonis",
+    # Audubon's "Columbia Magpie or Jay" (Pica bullockii) is the Mexican
+    # black-throated magpie-jay; his own Latin says Pica, so only a list helps.
+    "magpie": r"(?i)magpie[- ]jay|magpie or jay",
 }
 
 ANIMAL_IMG = "animal.jpg"
@@ -691,9 +694,15 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int,
     pool = [p for p in pages if names_beast(p)]
     if not pool:
         return None
+    # NYPL's "Birds of America" files are photos of the open book: spine,
+    # page edges, a grey bed and a Kodak colour bar, which the subject crop
+    # locks onto instead of the bird. Ranked like a modern photo.
+    def _is_book_shot(p) -> bool:
+        return "(NYPL " in p.get("title", "") or _meta(p, "Artist").startswith("Scan by")
+
     # Prefer a scan of the plate itself; fall back to a photograph of one.
     pool.sort(key=lambda p: p["title"])
-    originals = [p for p in pool if not _is_modern_repro(p)]
+    originals = [p for p in pool if not _is_modern_repro(p) and not _is_book_shot(p)]
     pool = originals or pool
     # The slot's pick, or the next ones in the pool if it turns out blank.
     for k in range(min(FAINT_RETRIES, len(pool))):
@@ -738,6 +747,10 @@ def _try_collection(coll: dict, common: str, latin: str, slot: int,
         dy = [] if repro else re.findall(r"\b1[5-9]\d\d\b", _meta(pick, "DateTimeOriginal"))
         year = dy[0] if dy else coll["years"]
     raw_artist = "" if repro else _meta(pick, "Artist")
+    # "Scan by NYPL" names the scanner, not the artist: treat it as absent,
+    # so the corpus's own artist is credited.
+    if re.match(r"(?i)(scan(ned)?|digiti[sz]ed|photographed) by\b", raw_artist):
+        raw_artist = ""
     cleaned = _clean_artist(raw_artist)
     if raw_artist and not cleaned:
         # The file positively states the artist is unknown. Say nothing —

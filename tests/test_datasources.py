@@ -733,3 +733,36 @@ def test_faint_or_blank_plate_falls_to_the_next_in_the_pool(data_dir, no_network
     monkeypatch.setattr(datasources, "_get_bytes", lambda url, **k: blank)
     assert datasources.get_animal(day) is None
     assert datasources._too_faint(b"not an image")
+
+
+def test_nypl_book_shot_is_ranked_after_plate_scans_and_not_credited(
+        data_dir, no_network, monkeypatch):
+    """NYPL's Audubon files photograph the open book (Kodak bar, page edges),
+    so a real plate scan wins; and when a book shot is all there is, its
+    Artist "Scan by NYPL" is the scanner — the caption credits Audubon."""
+    day = date(2026, 9, 17)
+    audubon = {**datasources.COLLECTIONS[5]}
+    _pin(monkeypatch, day, ("raven", "Corvus", "the Northern Hemisphere", "bird"),
+         collections=[audubon])
+    book = _page("File:Raven (NYPL b13559627-1).tiff", "https://t/book.jpg",
+                 Artist="Scan by NYPL",
+                 Categories="Birds of America, from drawings made in the United States")
+    plate = _page("File:Raven - Audubon Birds of America plate 101.jpg",
+                  "https://t/plate.jpg")
+    _serve(monkeypatch, book, plate)
+    assert datasources.get_animal(day)["file"] == plate["title"]
+
+    (data_dir / "cache" / "animal.json").unlink()
+    _serve(monkeypatch, book)
+    a = datasources.get_animal(day)
+    assert a["file"] == book["title"]
+    assert a["artist"] == "John James Audubon"
+
+
+def test_magpie_jay_is_not_a_magpie(data_dir, no_network, monkeypatch):
+    day = date(2026, 9, 17)
+    _pin(monkeypatch, day, ("magpie", "Pica", "the Northern Hemisphere", "bird"),
+         collections=[{**datasources.COLLECTIONS[5]}])
+    _serve(monkeypatch, _page("File:Columbia Magpie or Jay. Male.jpg", "https://t/j.jpg",
+                              ImageDescription="Pica Bullockii. Audubon"))
+    assert datasources.get_animal(day) is None
