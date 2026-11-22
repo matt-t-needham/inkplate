@@ -63,6 +63,13 @@ DEFAULT_CONFIG = {
     # Per-image rotation (clockwise degrees, keyed by Commons file title)
     # for plates scanned sideways. Only non-zero entries are kept.
     "image_rotations": {},
+    # Per-image placement inside the art box (pane Adjust / review page),
+    # keyed by Commons file title like image_rotations: {"x", "y", "scale"},
+    # see screens.normalize_placement. Only non-automatic entries are kept.
+    "image_placements": {},
+    # Commons file titles marked reviewed on the review page, so a batch of
+    # upcoming prints can be worked through and what's left is visible.
+    "reviewed_images": [],
     # Monotonic content version. The device compares this against the version
     # it stored in RTC memory to decide whether to redraw (a redraw costs ~20s
     # and visible flashing, so unchanged content must never trigger one).
@@ -98,6 +105,10 @@ def load_config() -> dict:
         cfg["rotation"] = 0
     if not isinstance(cfg.get("image_rotations"), dict):
         cfg["image_rotations"] = {}
+    if not isinstance(cfg.get("image_placements"), dict):
+        cfg["image_placements"] = {}
+    if not isinstance(cfg.get("reviewed_images"), list):
+        cfg["reviewed_images"] = []
     if cfg["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
         cfg["portrait_layout"] = screens.DEFAULT_PORTRAIT_LAYOUT
     try:
@@ -197,6 +208,21 @@ def update_config(**changes) -> dict:
             if deg:
                 rots[str(k)] = deg
         cfg["image_rotations"] = rots
+    if "image_placements" in changes:
+        v = changes["image_placements"]
+        if not isinstance(v, dict):
+            raise TypeError("image_placements must be a mapping")
+        places = {}
+        for k, p in v.items():
+            p = screens.normalize_placement(p)
+            if p:
+                places[str(k)] = p
+        cfg["image_placements"] = places
+    if "reviewed_images" in changes:
+        v = changes["reviewed_images"]
+        if not isinstance(v, list):
+            raise TypeError("reviewed_images must be a list")
+        cfg["reviewed_images"] = sorted({str(n) for n in v})
     save_config(cfg)
     return cfg
 

@@ -165,8 +165,11 @@
         <div class="sub" id="now-animal-sub"></div>
         <div class="btn-row">
           <button class="ghost" id="btn-rotate-animal" title="Turn the plate a quarter clockwise — for a scan bound in sideways. Remembered for this image.">Rotate ↻</button>
+          <button class="ghost" id="btn-adjust-animal" aria-expanded="false" title="Move and scale the print within its own area. Remembered for this image.">Adjust</button>
           <button class="danger" id="btn-veto-animal">Veto image</button>
         </div>
+        <div id="adjust-box" hidden style="margin-top:12px"></div>
+        <div class="meta-line"><a href="review" style="color:var(--text)">Review upcoming prints</a></div>
       </div>
     </div>
 
@@ -205,6 +208,7 @@
   </div>
 </main>
 
+<script src="placement.js"></script>
 <script>
 // All URLs are relative on purpose: this page is served both at :3008/ and at
 // the metrics site under /inkplate/ — absolute paths would break the latter.
@@ -322,10 +326,35 @@ function renderNow(cur) {
   const a = cur.animal;
   $('now-animal').textContent = a ? a.common_name : 'none cached yet';
   $('now-animal-sub').textContent = a ? [a.sci_name, a.year, a.artist,
-    a.rotation ? 'turned ' + a.rotation + '°' : null].filter(Boolean).join(' · ') : '';
+    a.rotation ? 'turned ' + a.rotation + '°' : null,
+    a.placement && !Placement.same(a.placement, Placement.DEFAULT) ? 'adjusted' : null,
+  ].filter(Boolean).join(' · ') : '';
   $('btn-veto-animal').disabled = !(a && a.file);
   $('btn-rotate-animal').disabled = !(a && a.file);
+  $('btn-adjust-animal').disabled = !(a && a.file);
+  // The print changed under an open Adjust (next animal, veto): close it.
+  if (adjuster && !(a && a.file === adjuster.file)) closeAdjust();
 }
+
+// ── Now showing: adjust (move/scale within the art box, per image) ──
+let adjuster = null;
+function closeAdjust() {
+  if (adjuster) adjuster.ctl.destroy();
+  adjuster = null;
+  $('adjust-box').hidden = true;
+  $('btn-adjust-animal').setAttribute('aria-expanded', 'false');
+}
+$('btn-adjust-animal').addEventListener('click', () => {
+  if (adjuster) { closeAdjust(); return; }
+  const a = stateCache && stateCache.current && stateCache.current.animal;
+  if (!a || !a.file) return;
+  $('adjust-box').hidden = false;
+  $('btn-adjust-animal').setAttribute('aria-expanded', 'true');
+  adjuster = {file: a.file, ctl: Placement.mount($('adjust-box'), {
+    file: a.file, placement: a.placement,
+    onSaved: async () => { await loadState(); refreshPreviewImg(); },
+  })};
+});
 
 async function veto(what, btn) {
   if (!confirm(`Veto this image? It's removed from rotation for good.`)) return;
@@ -342,7 +371,10 @@ async function rotateAnimal(btn) {
   try {
     await api('POST', 'api/rotate', {degrees: 90});
   } catch (e) { alert('Rotate failed: ' + e.message); }
-  finally { btn.disabled = false; await loadState(); refreshPreviewImg(); }
+  finally {
+    btn.disabled = false; await loadState(); refreshPreviewImg();
+    if (adjuster) adjuster.ctl.reload();
+  }
 }
 $('btn-rotate-animal').addEventListener('click', e => rotateAnimal(e.target));
 

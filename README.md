@@ -91,7 +91,14 @@ docker logs apps-inkplate-1 -f
   as an offset, so the preview and the device stay in sync.
 - **Now showing** — the current animal. **Veto image** bans that Commons
   file for good (the animal stays in rotation, drawn from another plate).
-  It can't be undone from the pane.
+  It can't be undone from the pane. **Rotate** turns a plate scanned
+  sideways; **Adjust** moves and scales the print within its own area
+  (drag, scale slider, Reset to automatic, Save) — both remembered for that
+  image. The preview is drawn by the dashboard's own code.
+- **Review upcoming prints** (`/review`) — the next 14 days' prints in the
+  order they will hang, each with its preview and the same move/scale,
+  rotate and veto actions, plus a *reviewed* mark so a batch can be worked
+  through. A print reviewed here is the one that hangs on its day.
 - **Configuration** — screen picker, **panel rotation** (0/90/180/270°,
   the panel's clockwise turn — 90° or 270° hangs it vertically and the
   dashboard switches to its portrait layout; the device still receives a

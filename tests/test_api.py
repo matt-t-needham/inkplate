@@ -227,3 +227,92 @@ def test_veto_animal_reports_no_replacement(client, monkeypatch):
     monkeypatch.setattr("renderer.render", lambda force=False: {"image_version": 1})
     assert client.post("/api/veto", json={"what": "animal"}).status_code == 502
     assert state.load_config()["vetoed_images"] == ["File:Vulpes a.tif"]  # still vetoed
+
+
+def _showing(fake_data, file="File:Fox.tif"):
+    """Put fake_data's animal on the panel (cache) as `file`, with a figure
+    the art box can lean into."""
+    import datasources
+    from PIL import ImageDraw
+    sheet = Image.new("RGB", (900, 1200), (238, 234, 224))
+    ImageDraw.Draw(sheet).rectangle([350, 300, 550, 900], fill=(30, 30, 30))
+    sheet.save(fake_data["animal"]["path"])
+    fake_data["animal"]["file"] = file
+    datasources._cache_write("animal.json", {"fetched_at": 0, "data": fake_data["animal"]})
+
+
+def test_placement_bumps_the_version_only_when_its_print_is_on_the_panel(
+        client, fake_data, monkeypatch):
+    import datasources
+    _showing(fake_data)
+    ahead = {**fake_data["animal"], "file": "File:Hare.tif", "common_name": "hare"}
+    monkeypatch.setattr(datasources, "find_print", lambda f: {
+        "File:Fox.tif": fake_data["animal"], "File:Hare.tif": ahead}.get(f))
+    v0 = client.post("/api/render").json()["image_version"]
+
+    r = client.post("/api/placement", json={"file": "File:Hare.tif", "x": 0.2, "scale": 1.4})
+    assert r.status_code == 200
+    assert r.json()["print"]["placement"] == {"x": 0.2, "y": 0.0, "scale": 1.4}
+    assert client.get("/api/display/meta").json()["image_version"] == v0   # not on the wall
+
+    r = client.post("/api/placement", json={"x": 0.2})        # the panel's own print
+    assert r.json()["render"]["image_version"] == v0 + 1
+    assert r.json()["current"]["animal"]["placement"]["x"] == 0.2
+    r = client.post("/api/placement", json={"reset": True})
+    assert r.json()["render"]["image_version"] == v0 + 2
+    assert state.load_config()["image_placements"] == {
+        "File:Hare.tif": {"x": 0.2, "y": 0.0, "scale": 1.4}}
+    # Saving the automatic fit by value stores nothing, and changes no pixels.
+    r = client.post("/api/placement", json={"x": 0, "y": 0, "scale": 1})
+    assert r.json()["render"]["image_version"] == v0 + 2
+    assert "File:Fox.tif" not in state.load_config()["image_placements"]
+
+    assert client.post("/api/placement", json={"file": "File:Nope.tif", "x": 0.1}).status_code == 404
+    assert client.post("/api/placement", json={"x": "left"}).status_code == 400
+
+
+def test_print_preview_reports_the_clamped_placement(client, fake_data):
+    import json
+    _showing(fake_data)
+    r = client.get("/api/print-preview.png", params={"file": "File:Fox.tif", "x": 5,
+                                                     "mode": "raw"})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    placed = json.loads(r.headers["X-Placement"])
+    assert 0 < placed["x"] < 1        # stored range caps at 1; the box edge sooner
+    # The preview is the art box at the panel's proportions (portrait hero).
+    import screens
+    box, _ = screens.art_box(1200, 1600, state.load_config(), True)
+    w, h = Image.open(io.BytesIO(r.content)).size
+    assert abs(w / h - (box[2] - box[0]) / (box[3] - box[1])) < 0.01
+    assert client.get("/api/print-preview.png", params={"file": "File:Nope.tif"}).status_code == 404
+
+
+def test_review_lists_upcoming_prints_with_their_settings(client, fake_data, monkeypatch):
+    import datasources
+    _showing(fake_data)
+    hare = {**fake_data["animal"], "file": "File:Hare.tif", "common_name": "hare"}
+    seen = {}
+
+    def upcoming(start, days, offset, period_days, vetoed):
+        seen.update(days=days, offset=offset, period=period_days)
+        return [{"slot": 1, "dates": ["2026-11-21"], "animal": fake_data["animal"]},
+                {"slot": 2, "dates": ["2026-11-22"], "animal": hare},
+                {"slot": 3, "dates": ["2026-11-23"], "animal": None}]
+    monkeypatch.setattr(datasources, "upcoming_animals", upcoming)
+    monkeypatch.setattr(datasources, "find_print",
+                        lambda f: {"File:Hare.tif": hare}.get(f))
+    client.post("/api/config", json={"animal_period_days": 2})
+    assert client.post("/api/reviewed", json={"file": "File:Hare.tif"}).status_code == 200
+    j = client.get("/api/review").json()
+    assert seen == {"days": 14, "offset": 0, "period": 2}
+    assert [it["on_panel"] for it in j["items"]] == [True, False, False]
+    assert j["items"][1]["print"]["reviewed"] is True
+    assert j["items"][2]["print"] is None
+    assert (j["total"], j["reviewed"]) == (2, 1)
+
+
+def test_review_page_served_with_relative_urls(client):
+    for path in ("/review", "/placement.js"):
+        r = client.get(path)
+        assert r.status_code == 200
+        assert "'/api" not in r.text and '"/api' not in r.text

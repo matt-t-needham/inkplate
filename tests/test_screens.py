@@ -1,3 +1,5 @@
+import pytest
+
 import screens
 
 
@@ -296,9 +298,56 @@ def test_draw_art_applies_per_image_rotation():
     assert turned[2] - turned[0] > turned[3] - turned[1]       # wide
 
 
-def test_with_rotation_reads_config_by_file():
+def test_image_settings_read_config_by_file():
     a = {"file": "File:Gorilla.tif", "path": "x"}
-    assert screens._with_rotation(a, {"File:Gorilla.tif": 90})["rotation"] == 90
-    assert screens._with_rotation(a, {})["rotation"] == 0
-    assert screens._with_rotation(None, {}) is None
+    cfg = {"image_rotations": {"File:Gorilla.tif": 90},
+           "image_placements": {"File:Gorilla.tif": {"x": 0.1, "y": 0, "scale": 1}}}
+    got = screens.with_image_settings(a, cfg)
+    assert (got["rotation"], got["placement"]["x"]) == (90, 0.1)
+    other = screens.with_image_settings({"file": "File:Other.tif"}, cfg)
+    assert (other["rotation"], other["placement"]) == (0, None)
+    assert screens.with_image_settings(None, cfg) is None
     assert "rotation" not in a   # the cached dict is not mutated
+
+
+def test_placement_moves_only_its_own_image(data_dir, fake_data):
+    """A placement saved for another file leaves the dashboard pixel-for-pixel
+    as the automatic fit draws it; one saved for this file moves the art."""
+    import state
+    _figure_plate().save(fake_data["animal"]["path"])
+    fake_data["animal"]["file"] = "File:Fox.tif"
+    state.update_config(portrait_layout="hero", show_snow=True)
+    auto = screens.dashboard(1200, 1600)
+    state.update_config(image_placements={"File:Other.tif": {"x": 0.3, "y": 0, "scale": 1.5}})
+    assert screens.dashboard(1200, 1600).tobytes() == auto.tobytes()
+    state.update_config(image_placements={"File:Fox.tif": {"x": 0.2, "y": 0, "scale": 1}})
+    moved = screens.dashboard(1200, 1600)
+    band = (0, 200, 1200, 900)   # under the caption, above the weather
+    a, m = _ink_bbox(auto.crop(band)), _ink_bbox(moved.crop(band))
+    assert m[0] - a[0] > 150 and m[2] > a[2]   # shifted right, by ~0.2 of the box
+
+
+def test_placement_is_clamped_at_the_box_edge():
+    """The subject's centre may go up to the box edge, never past it, so a
+    print can't be pushed out of its own area; the placement reported back
+    is the one drawn."""
+    import tempfile
+    from PIL import Image
+    box = (100, 100, 1100, 1100)
+
+    def place(p):
+        img, placed = Image.new("RGB", (1200, 1200), "white"), {}
+        rect = screens._draw_art(img, {"path": f.name, "placement": p}, box,
+                                 lambda v: v, lambda v: v, mode="centered", placed=placed)
+        return rect, _ink_bbox(img), placed["placement"]
+    with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
+        _figure_plate().save(f.name)
+        _, auto_ink, _ = place(None)
+        centre = (auto_ink[0] + auto_ink[2]) / 2            # 600: centred
+        inside = (box[2] - centre) / 1000 - 0.01            # just short of the edge
+        _, _, drawn = place({"x": inside, "y": 0, "scale": 1})
+        assert drawn["x"] == pytest.approx(inside, abs=1e-3)
+        rect, ink, drawn = place({"x": 1.0, "y": 0, "scale": 1})
+    assert drawn["x"] == pytest.approx((box[2] - centre) / 1000, abs=0.01)
+    assert rect[2] <= box[2] and rect[0] >= box[0]          # never drawn past the box
+    assert ink and ink[0] < box[2] - 40                     # and still there to see

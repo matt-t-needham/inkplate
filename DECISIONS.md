@@ -189,6 +189,34 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 25. Per-image placement and a review page (2026-11-21)
+The automatic crop gets most plates right but not all (a mount card, a
+figure that wants to sit lower). **Placement** is a per-image correction,
+stored like rotation: config `image_placements`, keyed by Commons file,
+`{x, y, scale}`. It is applied *after* the automatic trim/crop/fit, inside
+the same art box: scale about the subject's centre, then shift by a share of
+the box (`screens._place`). Pixels are resampled from the sheet, not the
+fitted bitmap, so a zoom stays sharp, and the fades are recomputed for the
+new rectangle. Stored values are capped (shift ±1 box, scale 0.5–2.5×) and
+the drawn subject centre is kept inside the box, so a print can't leave its
+area. No entry means the automatic fit, pixel for pixel (checked against the
+previous code on every layout).
+
+The pane's **Adjust** and the **review page** (`/review`) share
+`static/placement.js`; its picture is always a server render
+(`/api/print-preview.png`: the dashboard's own `art_box` + `_draw_art`,
+dithered to the six inks), never a CSS imitation — CSS only nudges the last
+render while a finger is down.
+
+The review page lists the next 14 days' prints. They come from the same
+slots (`slot_for`) and the same selection (`datasources._resolve`) as the
+panel; upcoming slots are resolved into `cache/prints/<slot>.*`, never over
+the panel's own `animal.*`, and **the panel adopts a looked-ahead print when
+its day comes**, so what was reviewed is what hangs even if Commons changes
+in between. `reviewed_images` in config records what has been worked
+through. Old placements and reviewed marks are not pruned: one short entry
+per image, a few hundred a year at most.
+
 ## 24. Bad plates and a beheaded lark: tighter validation, no-cut zoom (2026-10-25)
 
 Matt reported a run of bad images and a poorly cut top. Nothing recorded which

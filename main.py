@@ -10,14 +10,17 @@ behind the metrics nginx prefix (:9000/inkplate/).
 """
 
 import asyncio
+import io
+import json
 import logging
 import logging.handlers
 import os
 import time
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 import config
 
@@ -39,6 +42,7 @@ except OSError as e:
     log.warning("file logging unavailable: %s", e)
 
 import datasources  # noqa: E402
+import palette  # noqa: E402
 import renderer  # noqa: E402
 import screens  # noqa: E402
 import state  # noqa: E402
@@ -62,6 +66,17 @@ async def _ensure_fresh() -> dict:
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return (_STATIC / "index.html").read_text()
+
+
+@app.get("/review", response_class=HTMLResponse)
+async def review_page():
+    return (_STATIC / "review.html").read_text()
+
+
+@app.get("/placement.js")
+async def placement_js():
+    return FileResponse(_STATIC / "placement.js", media_type="text/javascript",
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/healthz")
@@ -94,12 +109,42 @@ def _current(cfg: dict | None = None) -> dict:
     From the cache (no network on the 10 s poll)."""
     cfg = cfg or state.load_config()
     a = datasources.cached_animal()
-    return {
-        "animal": ({k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
-                                           "collection", "file")}
-                   | {"rotation": (cfg.get("image_rotations") or {}).get(a.get("file"), 0)}
-                   if a else None),
-    }
+    return {"animal": _print_summary(a, cfg) if a else None}
+
+
+def _print_summary(a: dict, cfg: dict) -> dict:
+    """What the pane and the review page show of one print, with its
+    per-image settings."""
+    f = a.get("file")
+    return ({k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
+                                   "collection", "file")}
+            | {"rotation": (cfg.get("image_rotations") or {}).get(f, 0),
+               "placement": ((cfg.get("image_placements") or {}).get(f)
+                             or dict(screens.DEFAULT_PLACEMENT)),
+               "reviewed": f in (cfg.get("reviewed_images") or [])})
+
+
+async def _target_print(body: dict) -> dict:
+    """The print a per-image action is for: body["file"] when given (it must
+    be on the panel or looked ahead to by the review page), else the one on
+    the panel now. 404/409 when there is no such print."""
+    f = body.get("file")
+    if f is not None:
+        if not isinstance(f, str) or not f:
+            raise HTTPException(400, "file must be a Commons file title")
+        a = await asyncio.to_thread(datasources.find_print, f)
+        if not a:
+            raise HTTPException(404, "no such print on the panel or in the review list")
+        return a
+    a = datasources.cached_animal()
+    if not a or not a.get("file"):
+        raise HTTPException(409, "no animal image is currently showing")
+    return a
+
+
+def _on_panel(file: str) -> bool:
+    a = datasources.cached_animal()
+    return bool(a and a.get("file") == file)
 
 
 async def _rerender(why: str) -> dict:
@@ -171,12 +216,14 @@ async def api_veto(request: Request):
     what = body.get("what")
     cfg = state.load_config()
     if what == "animal":
-        a = datasources.cached_animal()
-        if not a or not a.get("file"):
-            raise HTTPException(409, "no animal image is currently showing")
+        a = await _target_print(body)
         await asyncio.to_thread(state.update_config,
                                 vetoed_images=cfg["vetoed_images"] + [a["file"]])
         state.log_event("config", f"vetoed image: {a['file']} ({a.get('common_name')})")
+        if not _on_panel(a["file"]):
+            # An upcoming print: its slot is looked up again on the review
+            # page's next load; the panel is unchanged.
+            return {"render": renderer.meta(), "current": _current()}
         m = await _rerender("veto")
         new = datasources.cached_animal()
         if not new or new.get("file") == a["file"]:
@@ -201,17 +248,139 @@ async def api_rotate(request: Request):
         raise HTTPException(400, "degrees must be an integer")
     if step % 90:
         raise HTTPException(400, "degrees must be a multiple of 90")
-    a = datasources.cached_animal()
-    if not a or not a.get("file"):
-        raise HTTPException(409, "no animal image is currently showing")
+    a = await _target_print(body)
     cfg = state.load_config()
     rots = dict(cfg.get("image_rotations") or {})
     rots[a["file"]] = (int(rots.get(a["file"], 0)) + step) % 360
     cfg = await asyncio.to_thread(state.update_config, image_rotations=rots)
     state.log_event("config", f"rotated image {a['file']} to "
                               f"{cfg['image_rotations'].get(a['file'], 0)}°")
-    m = await _rerender("rotate")
-    return {"config": cfg, "render": m, "current": _current(cfg)}
+    m = await _rerender("rotate") if _on_panel(a["file"]) else renderer.meta()
+    return {"config": cfg, "render": m, "current": _current(cfg),
+            "print": _print_summary(a, cfg)}
+
+
+@app.post("/api/placement")
+async def api_placement(request: Request):
+    """Save where a print sits in its art box: {x, y, scale} (see
+    screens.normalize_placement), or {reset: true} for the automatic fit.
+    Per Commons file, like rotation; `file` defaults to the print on the
+    panel. Re-renders when that print is on the panel; the version bumps
+    only if the pixels changed (content hash)."""
+    body = await request.json()
+    a = await _target_print(body)
+    cfg = state.load_config()
+    places = dict(cfg.get("image_placements") or {})
+    if body.get("reset"):
+        places.pop(a["file"], None)
+    else:
+        try:
+            p = screens.normalize_placement(
+                {k: body.get(k, d) for k, d in screens.DEFAULT_PLACEMENT.items()})
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if p:
+            places[a["file"]] = p
+        else:
+            places.pop(a["file"], None)
+    cfg = await asyncio.to_thread(state.update_config, image_placements=places)
+    placed = cfg["image_placements"].get(a["file"])
+    state.log_event("config", f"placed image {a['file']} at "
+                              f"{placed or 'the automatic fit'}")
+    m = await _rerender("placement") if _on_panel(a["file"]) else renderer.meta()
+    return {"render": m, "current": _current(cfg), "print": _print_summary(a, cfg)}
+
+
+@app.post("/api/reviewed")
+async def api_reviewed(request: Request):
+    """Mark a print reviewed (or not) on the review page: {file, reviewed}."""
+    body = await request.json()
+    if not isinstance(body.get("file"), str):
+        raise HTTPException(400, "file is required")
+    a = await _target_print(body)
+    cfg = state.load_config()
+    done = set(cfg.get("reviewed_images") or [])
+    if body.get("reviewed", True):
+        done.add(a["file"])
+    else:
+        done.discard(a["file"])
+    cfg = await asyncio.to_thread(state.update_config, reviewed_images=sorted(done))
+    return {"print": _print_summary(a, cfg)}
+
+
+REVIEW_DAYS = 14
+
+
+@app.get("/api/review")
+async def api_review(days: int = REVIEW_DAYS):
+    """The upcoming prints in the order they will hang, from today: the
+    renderer's own slots and selection (datasources.upcoming_animals), each
+    with its settings. Slow on first sight of a slot (it fetches from
+    Commons); cached after."""
+    cfg = state.load_config()
+    try:
+        items = await asyncio.to_thread(
+            datasources.upcoming_animals, date.today(), min(max(days, 1), 60),
+            cfg["animal_offset"], cfg["animal_period_days"], cfg["vetoed_images"])
+    except Exception as e:
+        log.error("review lookahead failed: %s", e, exc_info=True)
+        raise HTTPException(502, f"could not look ahead: {e}")
+    current = datasources.cached_animal()
+    out = [{"slot": it["slot"], "dates": it["dates"],
+            "on_panel": bool(it["animal"] and current
+                             and it["animal"].get("file") == current.get("file")),
+            "print": _print_summary(it["animal"], cfg) if it["animal"] else None}
+           for it in items]
+    prints = [o["print"] for o in out if o["print"]]
+    return {"items": out, "total": len(prints),
+            "reviewed": sum(1 for p in prints if p["reviewed"])}
+
+
+PREVIEW_MAX = 900   # px, the long side of a print preview
+
+
+@app.get("/api/print-preview.png")
+async def api_print_preview(file: str, x: float | None = None, y: float | None = None,
+                            scale: float | None = None, mode: str = "panel"):
+    """One print alone in its art box, drawn by the dashboard's own code at
+    the panel's size and layout — with the saved placement, or with x/y/scale
+    when given (an unsaved draft from the Adjust control). mode "panel" is
+    dithered to the six inks and shown as the panel will; "raw" is the RGB.
+    The placement actually drawn (clamped to the box) is in X-Placement."""
+    if mode not in ("raw", "panel"):
+        raise HTTPException(400, "mode must be raw|panel")
+    a = await asyncio.to_thread(datasources.find_print, file)
+    if not a:
+        raise HTTPException(404, "no such print on the panel or in the review list")
+    cfg = state.load_config()
+    animal = screens.with_image_settings(a, cfg)
+    if x is not None or y is not None or scale is not None:
+        saved = animal["placement"] or screens.DEFAULT_PLACEMENT
+        draft = {"x": saved["x"] if x is None else x, "y": saved["y"] if y is None else y,
+                 "scale": saved["scale"] if scale is None else scale}
+        try:
+            animal["placement"] = screens.normalize_placement(draft)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    def draw():
+        img, placed = screens.art_preview(animal, cfg,
+                                          renderer.upright_size(cfg["rotation"]))
+        if mode == "panel":
+            img = palette.simulate_panel(palette.dither_to_spectra(img))
+        img.thumbnail((PREVIEW_MAX, PREVIEW_MAX))
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue(), placed
+    try:
+        png, placed = await asyncio.to_thread(draw)
+    except Exception as e:
+        log.error("print preview failed for %s: %s", file, e, exc_info=True)
+        raise HTTPException(500, f"preview failed: {e}")
+    return Response(png, media_type="image/png",
+                    headers={"Cache-Control": "no-store",
+                             "X-Placement": json.dumps(placed)})
+
 
 
 @app.get("/api/preview.png")
