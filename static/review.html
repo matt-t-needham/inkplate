@@ -110,6 +110,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
   ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 
 let items = [];
+let artLayout = null;            // {key, name}: the layout the panel draws now
 const mounted = new Map();   // file → Placement controller
 
 function toast(m, bad) {
@@ -151,8 +152,9 @@ const io = new IntersectionObserver(es => {
     const it = items.find(i => i.animal && i.animal.file === e.target.dataset.file);
     if (!it || mounted.has(it.animal.file)) continue;
     mounted.set(it.animal.file, Placement.mount(e.target, {
-      file: it.animal.file, placement: it.animal.placement,
-      onSaved: a => { it.animal = a; toast('Placement saved for ' + a.common_name); },
+      file: it.animal.file, layout: artLayout.key, layoutName: artLayout.name,
+      placement: it.animal.placements[artLayout.key],
+      onSaved: a => { it.animal = a; },
     }));
   }
 }, {root: $('main'), rootMargin: '600px 0px'});
@@ -208,7 +210,7 @@ async function fetchReview() {
   const r = await fetch('api/review?days=' + encodeURIComponent($('days').value));
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
-  return j.items;
+  return j;
 }
 
 function schedulePoll() {
@@ -217,11 +219,13 @@ function schedulePoll() {
 }
 
 async function poll() {
-  let fresh;
-  try { fresh = await fetchReview(); }
+  let j;
+  try { j = await fetchReview(); }
   catch (e) { toast('Could not check for fetched prints: ' + e.message, true); schedulePoll(); return; }
-  if (fresh.length !== items.length || fresh.some((n, i) => n.dates[0] !== items[i].dates[0])) {
-    items = fresh; draw();
+  const fresh = j.items;
+  if (j.art_layout.key !== artLayout.key || fresh.length !== items.length ||
+      fresh.some((n, i) => n.dates[0] !== items[i].dates[0])) {
+    items = fresh; artLayout = j.art_layout; draw();
   } else {
     fresh.forEach((n, i) => {
       if (!items[i].pending || n.pending) return;
@@ -241,7 +245,8 @@ async function poll() {
 async function load() {
   clearTimeout(pollTimer);
   try {
-    items = await fetchReview();
+    const j = await fetchReview();
+    items = j.items; artLayout = j.art_layout;
     draw();
     schedulePoll();
   } catch (e) {

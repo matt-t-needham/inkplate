@@ -82,9 +82,9 @@ docker logs apps-inkplate-1 -f
 
 ## The control pane
 
-- **Preview** — exactly what the panel will show. Three views: *panel sim*
-  (muted pigment colors, closest to real e-paper), *dithered* (the actual
-  pixels the device gets), *raw* (pre-dither RGB).
+- **Preview** — exactly what the panel will show, as a panel simulation
+  (muted pigment colors, closest to real e-paper). The dithered and raw
+  renders are still at `api/preview.png?mode=dithered|raw`.
 - **Render now → push** — re-renders and bumps the content version. The device
   redraws at its next wake; in tethered mode that's within seconds.
 - **Next animal** — advances the daily animal for layout testing. Persisted
@@ -92,9 +92,11 @@ docker logs apps-inkplate-1 -f
 - **Now showing** — the current animal. **Veto image** bans that Commons
   file for good (the animal stays in rotation, drawn from another plate).
   It can't be undone from the pane. **Rotate** turns a plate scanned
-  sideways; **Adjust** moves and scales the print within its own area
-  — both remembered for that
-  image.
+  sideways (remembered for that image); **Adjust** moves and scales the
+  print within its own area, remembered for that image *in the layout the
+  panel is using* (landscape, portrait hero or portrait stack each keep
+  their own). Changes save themselves when a drag or the slider is
+  released.
 - **Review upcoming prints** (`/review`) — the next 14 days' prints in the
   order they will hang, each with its preview and the same move/scale,
   rotate and veto actions, plus a *reviewed* mark so they can be worked
@@ -113,9 +115,10 @@ docker logs apps-inkplate-1 -f
   then), animal cadence in days (default
   daily), weather and snow locations, tethered mode. Applies
   live; the device picks up cadence changes at its next check-in.
-- **Device check-ins** — battery voltage, Wi-Fi signal, boot count, errors.
-  The header badge turns red if the device misses ~2.5 wake windows.
-- **Server events** — render/config/error trail, so debugging needs no shell.
+- **Device** — battery (percent and volts) from the last check-in. The
+  header badge turns red if the device misses ~2.5 wake windows. The full
+  check-in history (RSSI, boot count, shown version, errors) is at
+  `api/checkins`, and the render/config/error trail at `api/events`.
 
 Note on "push": a deep-sleeping device is unreachable (radio off, ~14 µA) —
 nothing can be pushed *to* it. "Render now" stages the update; the device pulls
@@ -129,7 +132,7 @@ battery.
    Pillow RGB image (see `dashboard` for the pattern — data via
    `datasources.py` cached fetchers, degrade gracefully).
 2. Add it to the `SCREENS` dict.
-3. It appears in the control pane's screen picker. Check it in *panel sim*
+3. It appears in the control pane's screen picker. Check it in the
    preview — six inks is not many; bold shapes and dithered mid-tones work,
    subtle gradients don't.
 
@@ -184,7 +187,7 @@ Work through this in order. Steps 1–4 need no firmware at all.
    colors are swapped, the PNG color→ink mapping needs adjusting in firmware.
 4. Set screen to **dither_test** → gradients should look like smooth-ish
    newsprint, not banding or garbage.
-5. Watch check-ins appear in the control pane: battery voltage and RSSI sane?
+5. Watch check-ins arrive (`api/checkins`): battery voltage and RSSI sane?
 6. Turn **tethered off**, set cadence to 60 min, unplug USB → confirm a
    check-in arrives each hour and the header badge stays green.
 
@@ -192,7 +195,7 @@ Work through this in order. Steps 1–4 need no firmware at all.
 - Actual full-refresh time (spec says ~20 s) and how intrusive the flashing is.
 - Real battery drain per wake cycle vs the ~40–50 day claim.
 - Whether the 8 s Wi-Fi connect estimate holds on our network (WPA3 or a weak
-  signal can slow it — check RSSI in the pane; consider a static IP lease for
+  signal can slow it — check RSSI in `api/checkins`; consider a static IP lease for
   the device to skip DHCP).
 - PNG decode: 1600×1200 indexed PNG must fit ESP32-S3 decode buffers — with
   16 MB PSRAM it should be trivial, but if `drawImage` chokes, the fallback is

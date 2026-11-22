@@ -30,8 +30,8 @@ def test_index_served(client):
 
 def test_state_shape(client):
     st = client.get("/api/state").json()
-    assert set(st) == {"config", "screens", "portrait_layouts", "render", "last_checkin",
-                       "checkins", "events", "current", "battery_percent"}
+    assert set(st) == {"config", "screens", "portrait_layouts", "art_layout", "render",
+                       "last_checkin", "current", "battery_percent"}
     assert st["portrait_layouts"] == list(screens.PORTRAIT_LAYOUTS)
     assert st["portrait_layouts"][0] == screens.DEFAULT_PORTRAIT_LAYOUT == "hero"
     assert "placeholder" in st["screens"]
@@ -250,29 +250,33 @@ def test_placement_bumps_the_version_only_when_its_image_is_on_the_panel(
         "File:Fox.tif": fake_data["animal"], "File:Hare.tif": ahead}.get(f))
     v0 = client.post("/api/render").json()["image_version"]
 
-    r = client.post("/api/placement", json={"file": "File:Hare.tif", "x": 0.2, "scale": 1.4})
+    r = client.post("/api/placement", json={"file": "File:Hare.tif", "layout": "hero",
+                                            "x": 0.2, "scale": 1.4})
     assert r.status_code == 200
-    assert r.json()["animal"]["placement"] == {"x": 0.2, "y": 0.0, "scale": 1.4}
+    assert r.json()["animal"]["placements"] == {"hero": {"x": 0.2, "y": 0.0, "scale": 1.4}}
     assert client.get("/api/display/meta").json()["image_version"] == v0   # not on the wall
 
-    r = client.post("/api/placement", json={"x": 0.2})        # the panel's own image
+    # The panel's own image, in a layout the panel isn't drawing: no change.
+    r = client.post("/api/placement", json={"layout": "stack", "x": 0.2})
+    assert r.json()["render"]["image_version"] == v0
+    r = client.post("/api/placement", json={"x": 0.2})        # its current layout (hero)
     assert r.json()["render"]["image_version"] == v0 + 1
-    assert r.json()["current"]["animal"]["placement"]["x"] == 0.2
+    assert r.json()["current"]["animal"]["placements"]["hero"]["x"] == 0.2
     r = client.post("/api/placement", json={"reset": True})
     assert r.json()["render"]["image_version"] == v0 + 2
-    assert r.json()["animal"]["placement"] is None
-    assert state.load_config()["image_placements"] == {
-        "File:Hare.tif": {"x": 0.2, "y": 0.0, "scale": 1.4}}
+    assert r.json()["animal"]["placements"] == {"stack": {"x": 0.2, "y": 0.0, "scale": 1.0}}
     # Saving the automatic fit by value stores nothing, and changes no pixels.
-    r = client.post("/api/placement", json={"x": 0, "y": 0, "scale": 1})
+    r = client.post("/api/placement", json={"layout": "stack", "x": 0, "y": 0, "scale": 1})
     assert r.json()["render"]["image_version"] == v0 + 2
-    assert "File:Fox.tif" not in state.load_config()["image_placements"]
+    assert state.load_config()["image_placements"] == {
+        "File:Hare.tif": {"hero": {"x": 0.2, "y": 0.0, "scale": 1.4}}}
 
 
 def test_placement_rejects_unknown_images_and_junk(client, fake_data):
     _showing(fake_data)
     assert client.post("/api/placement", json={"file": "File:Nope.tif", "x": 0.1}).status_code == 404
     assert client.post("/api/placement", json={"x": "left"}).status_code == 400
+    assert client.post("/api/placement", json={"layout": "sideways", "x": 0.1}).status_code == 400
 
 
 def test_animal_preview_reports_the_clamped_placement(client, fake_data):
@@ -283,11 +287,17 @@ def test_animal_preview_reports_the_clamped_placement(client, fake_data):
     assert r.status_code == 200 and r.headers["content-type"] == "image/png"
     placed = json.loads(r.headers["X-Placement"])
     assert 0 < placed["x"] < 1        # stored range caps at 1; the box edge sooner
-    # The preview is the art box at the panel's proportions (portrait hero).
-    import screens
+    # The preview is the art box of the layout asked for, else the panel's
+    # own (portrait hero).
+    def aspect(r):
+        w, h = Image.open(io.BytesIO(r.content)).size
+        return w / h
     box, _ = screens.art_box(1200, 1600, "hero", True)
-    w, h = Image.open(io.BytesIO(r.content)).size
-    assert abs(w / h - (box[2] - box[0]) / (box[3] - box[1])) < 0.01
+    assert abs(aspect(r) - (box[2] - box[0]) / (box[3] - box[1])) < 0.01
+    r = client.get("/api/animal-preview.png", params={"file": "File:Fox.tif",
+                                                      "layout": "landscape", "mode": "raw"})
+    box, _ = screens.art_box(1600, 1200, "landscape", True)
+    assert abs(aspect(r) - (box[2] - box[0]) / (box[3] - box[1])) < 0.01
     assert client.get("/api/animal-preview.png", params={"file": "File:Nope.tif"}).status_code == 404
 
 

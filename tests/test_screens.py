@@ -301,23 +301,28 @@ def test_draw_art_applies_per_image_rotation():
 def test_image_settings_read_config_by_file():
     a = {"file": "File:Gorilla.tif", "path": "x"}
     cfg = {"image_rotations": {"File:Gorilla.tif": 90},
-           "image_placements": {"File:Gorilla.tif": {"x": 0.1, "y": 0, "scale": 1}}}
+           "image_placements": {"File:Gorilla.tif": {"hero": {"x": 0.1, "y": 0, "scale": 1}}}}
     other = screens.with_image_settings({"file": "File:Other.tif"}, cfg)
-    assert (other["rotation"], other["placement"]) == (0, None)
+    assert (other["rotation"], other["placements"]) == (0, {})
     got = screens.with_image_settings(a, cfg)
-    assert (got["rotation"], got["placement"]) == (90, {"x": 0.1, "y": 0, "scale": 1})
+    assert (got["rotation"], got["placements"]) == (90, {"hero": {"x": 0.1, "y": 0, "scale": 1}})
     assert "rotation" not in a   # the cached dict is not mutated
 
 
-def test_placement_moves_only_its_own_image(data_dir, fake_data):
+def test_placement_moves_only_its_own_image_in_its_own_layout(data_dir, fake_data):
     import state
     _figure_plate().save(fake_data["animal"]["path"])
     fake_data["animal"]["file"] = "File:Fox.tif"
     state.update_config(portrait_layout="hero", show_snow=True)
     auto = screens.dashboard(1200, 1600)
-    state.update_config(image_placements={"File:Other.tif": {"x": 0.3, "y": 0, "scale": 1.5}})
+    # Another image's placement, and this image's placement for the other
+    # portrait layout and for landscape, leave the hero pixel for pixel.
+    state.update_config(image_placements={
+        "File:Other.tif": {"hero": {"x": 0.3, "y": 0, "scale": 1.5}},
+        "File:Fox.tif": {"stack": {"x": 0.3, "y": 0, "scale": 1.5},
+                         "landscape": {"x": -0.3, "y": 0.1, "scale": 0.8}}})
     assert screens.dashboard(1200, 1600).tobytes() == auto.tobytes()
-    state.update_config(image_placements={"File:Fox.tif": {"x": 0.2, "y": 0, "scale": 1}})
+    state.update_config(image_placements={"File:Fox.tif": {"hero": {"x": 0.2, "y": 0, "scale": 1}}})
     moved = screens.dashboard(1200, 1600)
     band = (0, 200, 1200, 900)   # under the caption, above the weather
     a, m = _ink_bbox(auto.crop(band)), _ink_bbox(moved.crop(band))
@@ -334,8 +339,8 @@ def test_placement_is_clamped_at_the_box_edge():
 
     def place(p):
         img = Image.new("RGB", (1200, 1200), "white")
-        art = screens._draw_art(img, {"path": f.name, "placement": p}, box,
-                                lambda v: v, lambda v: v, mode="centered")
+        art = screens._draw_art(img, {"path": f.name, "placements": {"hero": p}}, box,
+                                lambda v: v, lambda v: v, mode="centered", layout="hero")
         return art.rect, _ink_bbox(img), art.placement
     with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
         _figure_plate().save(f.name)

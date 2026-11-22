@@ -1,11 +1,13 @@
-// Adjust control: move and scale one image inside its art box, saved per
-// image. Shared by the pane (index.html) and the review page (review.html).
+// Adjust control: move and scale one image inside one layout's art box,
+// saved per image and layout, automatically when a change is released.
+// Shared by the pane (index.html) and the review page (review.html).
 // The picture is always the server's render, never a CSS imitation (CSS only
 // nudges it while a finger is down). All URLs are relative: the pages are
 // also served under a prefix.
 (function () {
   const DEFAULT = {x: 0, y: 0, scale: 1};
   const NUDGE = 0.01;   // arrow keys move by 1% of the box
+  const NUDGE_SAVE_MS = 500;   // arrow-key nudges save once they pause
 
   const css = `
   .adj { display:flex; flex-direction:column; gap:10px; }
@@ -27,13 +29,12 @@
   .adj button { min-height:44px; padding:0 14px; border-radius:8px; font:inherit;
     font-size:14px; cursor:pointer; background:none; color:var(--bix-text, #cdd6f4);
     border:1px solid var(--bix-border-strong, #45475a); }
-  .adj button.adj-save { background:var(--bix-accent, #fab387);
-    color:var(--bix-on-accent, #11111b); border-color:var(--bix-accent, #fab387); font-weight:600; }
   .adj button:disabled { opacity:.45; cursor:default; }
   .adj-status { font-size:13px; color:var(--bix-text-soft, #a6adc8); }
   .adj-status.err { color:var(--bix-danger, #f38ba8); }
   .adj-pos { font-family:var(--bix-mono, ui-monospace, Menlo, monospace); font-size:12px;
-    color:var(--bix-text-muted, #7f849c); }`;
+    color:var(--bix-text-muted, #7f849c); }
+  .adj-for { font-size:12px; color:var(--bix-text-muted, #7f849c); }`;
   if (!document.getElementById('adj-css')) {
     const s = document.createElement('style');
     s.id = 'adj-css'; s.textContent = css;
@@ -53,14 +54,15 @@
     return j;
   }
 
-  // mount(el, {file, placement, onSaved}) → {reload(), destroy()}
-  // placement null means the automatic fit. onSaved(animal) gets the
-  // server's summary of the image after a save.
+  // mount(el, {file, layout, layoutName, placement, onSaved}) → {reload(), destroy()}
+  // layout is the art layout key the placement is for ("hero", ...), and
+  // layoutName its words ("portrait hero layout"). placement null means the
+  // automatic fit. onSaved(animal) gets the server's summary after a save.
   function mount(el, opts) {
-    const file = opts.file;
-    let saved = {...DEFAULT, ...(opts.placement || {})};
-    let draft = {...saved};
-    let seq = 0, objectUrl = null, drag = null;
+    const {file, layout} = opts;
+    let draft = {...DEFAULT, ...(opts.placement || {})};
+    let seq = 0, saveSeq = 0, saving = Promise.resolve();
+    let objectUrl = null, drag = null, nudgeTimer = null, gone = false;
 
     el.innerHTML = `
       <div class="adj">
@@ -75,10 +77,10 @@
         </div>
         <div class="adj-row">
           <button type="button" data-act="reset">Reset to automatic</button>
-          <button type="button" class="adj-save" data-act="save">Save</button>
           <span class="adj-status" role="status"></span>
         </div>
         <div class="adj-pos"></div>
+        <div class="adj-for"></div>
       </div>`;
     const stage = el.querySelector('.adj-stage');
     const img = stage.querySelector('img');
@@ -86,7 +88,7 @@
     const pctEl = el.querySelector('.adj-pct');
     const status = el.querySelector('.adj-status');
     const pos = el.querySelector('.adj-pos');
-    const saveBtn = el.querySelector('[data-act=save]');
+    el.querySelector('.adj-for').textContent = 'for the ' + (opts.layoutName || layout);
 
     function say(text, err) {
       status.textContent = text;
@@ -97,18 +99,15 @@
       pctEl.textContent = pct(draft.scale) + '%';
       pos.textContent = same(draft, DEFAULT) ? 'automatic fit'
         : `across ${signed(draft.x)} · down ${signed(draft.y)} · scale ${pct(draft.scale)}%`;
-      const dirty = !same(draft, saved);
-      saveBtn.disabled = !dirty;
-      if (dirty) say('Unsaved changes');
-      else if (status.textContent === 'Unsaved changes') say('');
     }
 
     // Latest request wins: a slow render must not overwrite a newer one.
+    // Resolves true when this render is still the latest.
     async function render() {
       const mine = ++seq;
       stage.classList.add('busy');
-      const q = new URLSearchParams({file, x: draft.x, y: draft.y, scale: draft.scale,
-                                     t: Date.now()});
+      const q = new URLSearchParams({file, layout, x: draft.x, y: draft.y,
+                                     scale: draft.scale, t: Date.now()});
       try {
         const r = await fetch('api/animal-preview.png?' + q);
         if (!r.ok) {
@@ -134,6 +133,31 @@
       } finally {
         if (mine === seq) stage.classList.remove('busy');
       }
+      return mine === seq;
+    }
+
+    // Saves run one after another so the last change is the one stored;
+    // only the latest reports its outcome.
+    function save() {
+      clearTimeout(nudgeTimer);
+      nudgeTimer = null;
+      const mine = ++saveSeq;
+      const body = same(draft, DEFAULT) ? {file, layout, reset: true}
+        : {file, layout, x: draft.x, y: draft.y, scale: draft.scale};
+      say('Saving…');
+      saving = saving.then(() => postJSON('api/placement', body)).then(j => {
+        if (gone || mine !== saveSeq) return;
+        say('Saved');
+        if (opts.onSaved) opts.onSaved(j.animal);
+      }, e => {
+        if (!gone && mine === saveSeq) say('Save failed: ' + e.message, true);
+      });
+    }
+    // A released drag or slider: draw it (which also clamps it to the box
+    // the way the server will), then save what was drawn.
+    async function commit() {
+      say('Saving…');
+      if (await render()) save();
     }
 
     stage.addEventListener('pointerdown', e => {
@@ -155,7 +179,7 @@
       if (!dx && !dy) return;
       draft = {...draft, x: draft.x + dx / stage.clientWidth,
                          y: draft.y + dy / stage.clientHeight};
-      sync(); render();
+      sync(); commit();
     }
     stage.addEventListener('pointerup', endDrag);
     stage.addEventListener('pointercancel', endDrag);
@@ -166,6 +190,8 @@
       e.preventDefault();
       draft = {...draft, x: draft.x + step[0], y: draft.y + step[1]};
       sync(); render();
+      clearTimeout(nudgeTimer);
+      nudgeTimer = setTimeout(save, NUDGE_SAVE_MS);
     });
 
     range.addEventListener('input', () => {
@@ -175,29 +201,12 @@
     });
     range.addEventListener('change', () => {
       draft = {...draft, scale: range.value / 100};
-      sync(); render();
+      sync(); commit();
     });
 
     el.querySelector('[data-act=reset]').addEventListener('click', () => {
       draft = {...DEFAULT};
-      sync(); render();
-    });
-    saveBtn.addEventListener('click', async () => {
-      saveBtn.disabled = true;
-      say('Saving…');
-      try {
-        const body = same(draft, DEFAULT) ? {file, reset: true}
-                                          : {file, x: draft.x, y: draft.y, scale: draft.scale};
-        const j = await postJSON('api/placement', body);
-        saved = {...DEFAULT, ...j.animal.placement};
-        draft = {...saved};
-        sync();
-        say('Saved');
-        if (opts.onSaved) opts.onSaved(j.animal);
-      } catch (e) {
-        say('Save failed: ' + e.message, true);
-        saveBtn.disabled = false;
-      }
+      sync(); save(); render();
     });
 
     sync();
@@ -205,7 +214,13 @@
     render();
     return {
       reload: render,   // e.g. after the image was rotated
-      destroy() { seq++; if (objectUrl) URL.revokeObjectURL(objectUrl); el.innerHTML = ''; },
+      destroy() {
+        // A nudge still waiting to save is saved, not lost.
+        if (nudgeTimer) save();
+        gone = true; seq++;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        el.innerHTML = '';
+      },
     };
   }
 

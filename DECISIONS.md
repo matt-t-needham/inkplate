@@ -192,17 +192,26 @@ English tokens (Buffon's beaver-gland diagrams, no thank you).
 ## 25. Per-image placement and a review page (2026-11-21)
 The automatic crop gets most plates right but not all (a mount card, a
 figure that wants to sit lower). **Placement** is a per-image correction,
-stored like rotation: config `image_placements`, keyed by Commons file,
-`{x, y, scale}`. It is applied *after* the automatic trim/crop/fit, inside
-the same art box (`screens._place`). Stored values are capped and the drawn
-subject centre is kept inside the box, so a print can't leave its area. No
-entry means the automatic fit, pixel for pixel.
+**kept per layout**: config `image_placements[file][layout] = {x, y,
+scale}`, where `layout` is the art box it was made in (`landscape`, `hero`,
+`stack`: `screens.ART_LAYOUTS`). A nudge that suits the hero's centred box
+is wrong for a bleed, so each art box keeps its own; the key is a plain
+string the caller of `art_box`/`_draw_art` names, so a later screen (the
+planner) adds its own. It is applied *after* the automatic trim/crop/fit,
+inside the same art box (`screens._place`). Stored values are capped and the
+drawn subject centre is kept inside the box, so a print can't leave its
+area. No entry for the layout being drawn means the automatic fit, pixel for
+pixel. Malformed entries are dropped on load (nothing was deployed with the
+earlier one-placement-per-image shape, so there is no migration).
 
 The pane's **Adjust** and the **review page** (`/review`) share
-`static/placement.js`; its picture is always a server render
-(`/api/animal-preview.png`: the dashboard's own `art_box` + `_draw_art`,
-dithered to the six inks), never a CSS imitation — CSS only nudges the last
-render while a finger is down.
+`static/placement.js` and adjust the placement for the layout the panel is
+using now (named under the control). Saving is automatic: a released drag
+or slider saves, arrow-key nudges save after a 500 ms pause, *Reset to
+automatic* saves at once; the status reads Saving… / Saved / the error. Its
+picture is always a server render (`/api/animal-preview.png?layout=…`: the
+dashboard's own `art_box` + `_draw_art`, dithered to the six inks), never a
+CSS imitation — CSS only nudges the last render while a finger is down.
 
 The review page lists the next 14 days' prints. They come from the same
 slots (`slot_for`) and the same selection (`datasources._resolve`) as the

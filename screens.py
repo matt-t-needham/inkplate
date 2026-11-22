@@ -395,6 +395,13 @@ PORTRAIT = (1200, 1600)
 
 PORTRAIT_LAYOUTS = ("hero", "stack")
 DEFAULT_PORTRAIT_LAYOUT = "hero"
+# The art boxes a placement can be saved for (art_box). Each is a plain
+# string named by the caller of art_box/_draw_art; a new screen with its own
+# art box adds its key here.
+LANDSCAPE_LAYOUT = "landscape"
+ART_LAYOUTS = (LANDSCAPE_LAYOUT, *PORTRAIT_LAYOUTS)
+ART_LAYOUT_NAMES = {"landscape": "landscape layout", "hero": "portrait hero layout",
+                    "stack": "portrait stack layout"}
 
 WEATHER_BLOCK_H = 440      # top of the glyph row to the bottom of the °F line
 # Portrait: the weather's first row (glyph · 21° · HIGH 28°) reaches x≈920 of
@@ -427,19 +434,31 @@ CAPTION_FADE_FEATHER = 28
 def with_image_settings(animal: dict | None, cfg: dict) -> dict | None:
     """The animal dict plus its per-image settings from config, keyed by the
     Commons file: "rotation" (clockwise degrees, for plates scanned
-    sideways) and "placement" (the pane's move/scale, see
-    normalize_placement; None is the automatic fit). The cached dict is left
-    untouched."""
+    sideways) and "placements" ({art layout: the pane's move/scale}, see
+    normalize_placement; a layout with no entry gets the automatic fit).
+    The cached dict is left untouched."""
     if not animal:
         return animal
     f = animal.get("file")
     return {**animal,
             "rotation": int((cfg.get("image_rotations") or {}).get(f, 0)) % 360,
-            "placement": (cfg.get("image_placements") or {}).get(f)}
+            "placements": dict((cfg.get("image_placements") or {}).get(f) or {})}
+
+
+def panel_layout(cfg: dict, size: tuple[int, int]) -> str:
+    """The art layout the dashboard draws at this frame size: landscape, or
+    the configured portrait layout."""
+    width, height = size
+    if height > width:
+        lay = cfg.get("portrait_layout")
+        return lay if lay in PORTRAIT_LAYOUTS else DEFAULT_PORTRAIT_LAYOUT
+    return LANDSCAPE_LAYOUT
 
 
 # Per-image placement: the pane's Adjust control moves and scales an image
-# inside its art box, after the automatic trim/crop/fit has placed it. x and
+# inside one layout's art box, after the automatic trim/crop/fit has placed
+# it. Placements are kept per layout (config image_placements[file][layout]),
+# because a nudge that suits the hero's centred box is wrong for a bleed. x and
 # y shift the subject's centre by that share of the box's width and height;
 # scale multiplies the automatic scale. Stored values are kept inside these
 # limits, and _draw_art also keeps the subject's centre inside the box, so an
@@ -518,13 +537,13 @@ def _hero_rows(height: int, Y, snow: bool) -> tuple[int, int]:
     return bottom, band_top
 
 
-def art_box(width: int, height: int, layout: str | None, snow: bool):
-    """Where the dashboard draws the art, for this frame size, portrait
-    layout (ignored in landscape) and snow row: ((x0, y0, x1, y1), mode) for
-    _draw_art."""
-    if height > width:
+def art_box(width: int, height: int, layout: str, snow: bool):
+    """Where the dashboard draws the art for an art layout (ART_LAYOUTS) at
+    this frame size and snow row: ((x0, y0, x1, y1), mode) for _draw_art."""
+    if layout not in ART_LAYOUTS:
+        raise ValueError(f"unknown art layout: {layout!r}")
+    if layout != LANDSCAPE_LAYOUT:
         X, Y = _scalers(width, height, PORTRAIT)
-        layout = layout if layout in PORTRAIT_LAYOUTS else DEFAULT_PORTRAIT_LAYOUT
         if layout == "hero":
             _, band_top = _hero_rows(height, Y, snow)
             m = X(HERO_MARGIN)
@@ -537,17 +556,16 @@ def art_box(width: int, height: int, layout: str | None, snow: bool):
     return (X(440), Y(140), width, height), "bleed"
 
 
-def art_preview(animal: dict, cfg: dict, size: tuple[int, int]):
-    """The art alone, drawn exactly as the dashboard draws it (same box,
-    mode, crop, fades and placement) on a white frame of `size`, cropped to
-    its art box. Returns (image, placement as drawn after clamping to the
-    box, None for the automatic fit)."""
+def art_preview(animal: dict, cfg: dict, layout: str, size: tuple[int, int]):
+    """The art alone, drawn exactly as the dashboard draws it in `layout`
+    (same box, mode, crop, fades and that layout's placement) on a white
+    frame of `size`, cropped to its art box. Returns (image, placement as
+    drawn after clamping to the box, None for the automatic fit)."""
     width, height = size
     X, Y = _scalers(width, height, PORTRAIT if height > width else LANDSCAPE)
-    box, mode = art_box(width, height, cfg.get("portrait_layout"),
-                        bool(cfg.get("show_snow")))
+    box, mode = art_box(width, height, layout, bool(cfg.get("show_snow")))
     img = Image.new("RGB", (width, height), WHITE)
-    art = _draw_art(img, animal, box, X, Y, mode=mode)
+    art = _draw_art(img, animal, box, X, Y, mode=mode, layout=layout)
     return img.crop(box), art.placement if art else None
 
 
@@ -556,8 +574,9 @@ def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict) -> Imag
     X, Y = _scalers(width, height, LANDSCAPE)
     halo = dict(stroke_width=max(2, Y(4)), stroke_fill=WHITE)   # text over art
 
-    box, mode = art_box(width, height, None, bool(data["snow"]))
-    drew_art = _draw_art(img, data["animal"], box, X, Y, mode=mode)
+    box, mode = art_box(width, height, LANDSCAPE_LAYOUT, bool(data["snow"]))
+    drew_art = _draw_art(img, data["animal"], box, X, Y, mode=mode,
+                         layout=LANDSCAPE_LAYOUT)
 
     d = ImageDraw.Draw(img)
     _draw_caption(d, data["animal"] if drew_art else None, width - X(48), Y(36),
@@ -583,7 +602,7 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
     if layout == "hero":
         bottom, band_top = _hero_rows(height, Y, bool(data["snow"]))
         box, mode = art_box(width, height, layout, bool(data["snow"]))
-        art = _draw_art(img, data["animal"], box, X, Y, mode=mode)
+        art = _draw_art(img, data["animal"], box, X, Y, mode=mode, layout=layout)
         art_rect = art.rect if art else None
         d = ImageDraw.Draw(img)
         # Anything laid over the art is measured first (drawn into a 1px
@@ -611,7 +630,7 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
 
     # stack: the landscape arrangement folded — info on top, art below.
     box, mode = art_box(width, height, layout, bool(data["snow"]))
-    drew_art = _draw_art(img, data["animal"], box, X, Y, mode=mode)
+    drew_art = _draw_art(img, data["animal"], box, X, Y, mode=mode, layout=layout)
     d = ImageDraw.Draw(img)
     _draw_caption(d, data["animal"] if drew_art else None, right,
                   Y(PORTRAIT_CAPTION_TOP), X, Y, halo)
@@ -662,7 +681,7 @@ class Art(NamedTuple):
 
 
 def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
-              mode: str = "bleed") -> Art | None:
+              mode: str = "bleed", layout: str | None = None) -> Art | None:
     """The engraving, fitted into a fixed art box (x0, y0, x1, y1) in frame
     pixels. The box is defined in panel coordinates, not derived from the
     image, so every plate lands in the same place whatever its dimensions.
@@ -671,9 +690,10 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     centroid, never through ink); a scene covers the box.
     `animal["rotation"]` (clockwise degrees, from config) turns a plate
     that was scanned sideways before anything else looks at it.
-    `animal["placement"]` (the pane's Adjust, see PLACEMENT_SHIFT) then
-    moves and scales the result inside the box; None draws it exactly as
-    the automatic fit does.
+    `animal["placements"][layout]` (the pane's Adjust for this art layout,
+    a string the caller names; see PLACEMENT_SHIFT) then moves and scales
+    the result inside the box; no entry draws it exactly as the automatic
+    fit does.
 
     mode "bleed" (landscape, stack): anchored to the box's right edge with
     the last ART_BLEED running off the frame, long fades on the left and
@@ -688,7 +708,8 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     if not animal:
         return None
     try:
-        placement = normalize_placement(animal.get("placement"))
+        placement = normalize_placement(
+            (animal.get("placements") or {}).get(layout) if layout else None)
     except ValueError as e:
         log.warning("ignoring bad placement for %s: %s", animal.get("file"), e)
         placement = None

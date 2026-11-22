@@ -107,7 +107,7 @@ def test_concurrent_mutations_to_different_keys_both_survive(data_dir):
     t.start()
     inside.wait(5)
     state.mutate(lambda cfg: {"image_placements": {
-        **cfg["image_placements"], "File:B.tif": {"x": 0.1, "y": 0, "scale": 1}}})
+        **cfg["image_placements"], "File:B.tif": {"hero": {"x": 0.1, "y": 0, "scale": 1}}}})
     t.join(5)
     cfg = state.load_config()
     assert cfg["reviewed_images"] == ["File:A.tif"]

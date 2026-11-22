@@ -89,19 +89,40 @@ async def healthz():
 @app.get("/api/state")
 async def api_state():
     cfg = state.load_config()
-    checkins = state.read_checkins(limit=20)
+    checkins = state.read_checkins(limit=5)   # newest first; skips a torn line
     return {
         "config": cfg,
         "screens": list(screens.SCREENS.keys()),
         "portrait_layouts": list(screens.PORTRAIT_LAYOUTS),
+        "art_layout": _art_layout(cfg),
         "render": renderer.meta(),
         "last_checkin": checkins[0] if checkins else None,
         "battery_percent": (state.battery_percent(checkins[0].get("battery_voltage"))
                             if checkins else None),
-        "checkins": checkins,
-        "events": state.read_events(limit=50),
         "current": _current(cfg),
     }
+
+
+def _art_layout(cfg: dict) -> dict:
+    """The art layout the panel draws now: the one the pane's Adjust and the
+    review page place prints for."""
+    key = screens.panel_layout(cfg, renderer.upright_size(cfg["rotation"]))
+    return {"key": key, "name": screens.ART_LAYOUT_NAMES.get(key, key)}
+
+
+def _layout_param(v, cfg: dict) -> str:
+    """A request's art layout: one of screens.ART_LAYOUTS, else 400; None
+    means the panel's current one."""
+    if v is None:
+        return _art_layout(cfg)["key"]
+    if v not in screens.ART_LAYOUTS:
+        raise HTTPException(400, f"layout must be one of {', '.join(screens.ART_LAYOUTS)}")
+    return v
+
+
+def _layout_size(layout: str) -> tuple[int, int]:
+    """The frame size the dashboard draws an art layout at."""
+    return renderer.upright_size(0 if layout == screens.LANDSCAPE_LAYOUT else 90)
 
 
 def _current(cfg: dict | None = None) -> dict:
@@ -114,10 +135,11 @@ def _current(cfg: dict | None = None) -> dict:
 
 def _animal_summary(a: dict, cfg: dict) -> dict:
     """What the pane and the review page show of one animal, with its
-    per-image settings ("placement" None = the automatic fit)."""
+    per-image settings ("placements" {layout: placement}; a layout with no
+    entry is the automatic fit)."""
     a = screens.with_image_settings(a, cfg)
     return ({k: a.get(k) for k in ("common_name", "sci_name", "year", "artist",
-                                   "collection", "file", "rotation", "placement")}
+                                   "collection", "file", "rotation", "placements")}
             | {"reviewed": a.get("file") in cfg["reviewed_images"]})
 
 
@@ -257,19 +279,23 @@ async def api_rotate(request: Request):
 
 @app.post("/api/placement")
 async def api_placement(request: Request):
-    """Save where an image sits in its art box: {x, y, scale} (see
-    screens.normalize_placement), or {reset: true} for the automatic fit.
-    Per Commons file, like rotation; `file` defaults to the image on the
-    panel. Re-renders when that image is on the panel."""
+    """Save where an image sits in one layout's art box: {layout, x, y,
+    scale} (see screens.normalize_placement), or {layout, reset: true} for
+    the automatic fit. Per Commons file and art layout; `file` defaults to
+    the image on the panel and `layout` to the panel's current one.
+    Re-renders when that image is on the panel."""
     body = await request.json()
+    layout = _layout_param(body.get("layout"), state.load_config())
     a = await _target_animal(body)
     try:
-        p = None if body.get("reset") else screens.normalize_placement(body)
+        p = None if body.get("reset") else screens.normalize_placement(
+            {k: body[k] for k in ("x", "y", "scale") if k in body})
     except ValueError as e:
         raise HTTPException(400, str(e))
     cfg = await asyncio.to_thread(state.mutate, lambda cfg: {
-        "image_placements": {**cfg["image_placements"], a["file"]: p}})
-    state.log_event("config", f"placed image {a['file']} at "
+        "image_placements": {**cfg["image_placements"], a["file"]: {
+            **cfg["image_placements"].get(a["file"], {}), layout: p}}})
+    state.log_event("config", f"placed image {a['file']} in {layout} at "
                               f"{p or 'the automatic fit'}")
     m = await _rerender("placement") if _on_panel(a["file"]) else renderer.meta()
     return {"render": m, "current": _current(cfg), "animal": _animal_summary(a, cfg)}
@@ -337,7 +363,7 @@ async def api_review(days: int = REVIEW_DAYS):
             "animal": _animal_summary(it["animal"], cfg) if it["animal"] else None}
            for it in items]
     animals = [o["animal"] for o in out if o["animal"]]
-    return {"items": out, "total": len(animals),
+    return {"items": out, "art_layout": _art_layout(cfg), "total": len(animals),
             "reviewed": sum(1 for a in animals if a["reviewed"])}
 
 
@@ -345,32 +371,34 @@ PREVIEW_MAX = 900   # px, the long side of an animal preview
 
 
 @app.get("/api/animal-preview.png")
-async def api_animal_preview(file: str, x: float | None = None, y: float | None = None,
+async def api_animal_preview(file: str, layout: str | None = None,
+                             x: float | None = None, y: float | None = None,
                              scale: float | None = None, mode: str = "panel"):
-    """One image alone in its art box, drawn by the dashboard's own code at
-    the panel's size and layout — with the saved placement, or with x/y/scale
-    when given (an unsaved draft from the Adjust control). mode "panel" is
+    """One image alone in one layout's art box (default: the panel's
+    current layout), drawn by the dashboard's own code at that layout's
+    size — with the placement saved for that layout, or with x/y/scale when
+    given (an unsaved draft from the Adjust control). mode "panel" is
     dithered to the six inks and shown as the panel will; "raw" is the RGB.
     The placement actually drawn (clamped to the box) is in X-Placement."""
     if mode not in ("raw", "panel"):
         raise HTTPException(400, "mode must be raw|panel")
+    cfg = state.load_config()
+    layout = _layout_param(layout, cfg)
     a = await asyncio.to_thread(datasources.find_animal, file)
     if not a:
         raise HTTPException(404, "no such image on the panel or in the review list")
-    cfg = state.load_config()
     animal = screens.with_image_settings(a, cfg)
     if x is not None or y is not None or scale is not None:
-        saved = animal["placement"] or screens.DEFAULT_PLACEMENT
+        saved = animal["placements"].get(layout) or screens.DEFAULT_PLACEMENT
         draft = {"x": saved["x"] if x is None else x, "y": saved["y"] if y is None else y,
                  "scale": saved["scale"] if scale is None else scale}
         try:
-            animal["placement"] = screens.normalize_placement(draft)
+            animal["placements"][layout] = screens.normalize_placement(draft)
         except ValueError as e:
             raise HTTPException(400, str(e))
 
     def draw():
-        img, placed = screens.art_preview(animal, cfg,
-                                          renderer.upright_size(cfg["rotation"]))
+        img, placed = screens.art_preview(animal, cfg, layout, _layout_size(layout))
         if mode == "panel":
             img = palette.simulate_panel(palette.dither_to_spectra(img))
         img.thumbnail((PREVIEW_MAX, PREVIEW_MAX))

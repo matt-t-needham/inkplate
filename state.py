@@ -65,9 +65,10 @@ DEFAULT_CONFIG = {
     # Per-image rotation (clockwise degrees, keyed by Commons file title)
     # for plates scanned sideways. Only non-zero entries are kept.
     "image_rotations": {},
-    # Per-image placement inside the art box (pane Adjust / review page),
-    # keyed by Commons file title like image_rotations: {"x", "y", "scale"},
-    # see screens.normalize_placement. Only non-automatic entries are kept.
+    # Per-image placement inside an art box (pane Adjust / review page):
+    # {Commons file title: {art layout: {"x", "y", "scale"}}}, the layout
+    # being a screens.art_box key ("landscape", "hero", ...); see
+    # screens.normalize_placement. Only non-automatic entries are kept.
     "image_placements": {},
     # Commons file titles marked reviewed on the review page: a reviewed
     # upcoming image is the one that hangs on its day.
@@ -107,8 +108,7 @@ def load_config() -> dict:
         cfg["rotation"] = 0
     if not isinstance(cfg.get("image_rotations"), dict):
         cfg["image_rotations"] = {}
-    if not isinstance(cfg.get("image_placements"), dict):
-        cfg["image_placements"] = {}
+    cfg["image_placements"] = _clean_placements(cfg.get("image_placements"))
     if not isinstance(cfg.get("reviewed_images"), list):
         cfg["reviewed_images"] = []
     if cfg["portrait_layout"] not in screens.PORTRAIT_LAYOUTS:
@@ -119,6 +119,33 @@ def load_config() -> dict:
         log.warning("refresh_anchor %r is not HH:MM, falling back", cfg["refresh_anchor"])
         cfg["refresh_anchor"] = config.DEFAULT_REFRESH_ANCHOR
     return cfg
+
+
+def _clean_placements(v) -> dict:
+    """image_placements as read from disk, with any malformed entry (not a
+    {file: {layout: placement}} mapping, or a placement that doesn't
+    validate) dropped and logged."""
+    if not isinstance(v, dict):
+        if v is not None:
+            log.warning("image_placements is not a mapping, dropping it")
+        return {}
+    out = {}
+    for f, per in v.items():
+        if not isinstance(per, dict):
+            log.warning("dropping malformed placements for %s", f)
+            continue
+        kept = {}
+        for lay, p in per.items():
+            try:
+                q = screens.normalize_placement(p)
+            except ValueError as e:
+                log.warning("dropping placement for %s in %s: %s", f, lay, e)
+                continue
+            if q:
+                kept[lay] = q
+        if kept:
+            out[f] = kept
+    return out
 
 
 def parse_anchor(v) -> str:
@@ -226,10 +253,13 @@ def _apply(cfg: dict, changes: dict) -> dict:
         if not isinstance(v, dict):
             raise TypeError("image_placements must be a mapping")
         places = {}
-        for k, p in v.items():
-            p = screens.normalize_placement(p)
-            if p:
-                places[str(k)] = p
+        for f, per in v.items():
+            if not isinstance(per, dict):
+                raise TypeError("image_placements values must map art layouts to placements")
+            per = {str(lay): q for lay, p in per.items()
+                   if (q := screens.normalize_placement(p))}
+            if per:
+                places[str(f)] = per
         cfg["image_placements"] = places
     if "reviewed_images" in changes:
         v = changes["reviewed_images"]
@@ -284,7 +314,7 @@ PROBLEM_EVENT_KINDS = {"error", "device_error"}
 
 def log_event(kind: str, message: str, **extra) -> None:
     """Server-side event trail (renders, config changes, device errors) —
-    shown in the control pane so debugging doesn't require shell access.
+    served at /api/events so debugging doesn't require shell access.
     Problem kinds aren't echoed to the log: their callers log them at
     WARNING/ERROR with the detail, and an INFO echo would put a failure in
     app.log under the wrong level."""
