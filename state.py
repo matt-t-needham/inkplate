@@ -69,8 +69,8 @@ DEFAULT_CONFIG = {
     # keyed by Commons file title like image_rotations: {"x", "y", "scale"},
     # see screens.normalize_placement. Only non-automatic entries are kept.
     "image_placements": {},
-    # Commons file titles marked reviewed on the review page, so the
-    # upcoming images can be worked through and what's left is visible.
+    # Commons file titles marked reviewed on the review page: a reviewed
+    # upcoming image is the one that hangs on its day.
     "reviewed_images": [],
     # Monotonic content version. The device compares this against the version
     # it stored in RTC memory to decide whether to redraw (a redraw costs ~20s
@@ -144,10 +144,7 @@ def update_config(**changes) -> dict:
 
 
 def mutate(fn) -> dict:
-    """Read-modify-write where the change depends on the current config:
-    `fn(cfg)` returns the changes for update_config, computed from a copy
-    loaded under the same lock as the save, so concurrent writers can't
-    drop each other's edits. Returns the new config."""
+    """update_config where the changes depend on the current config; fn runs under the lock."""
     with _lock:
         cfg = load_config()
         return _apply(cfg, fn(cfg))

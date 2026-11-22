@@ -332,7 +332,7 @@ function renderNow(cur) {
   $('btn-veto-animal').disabled = !(a && a.file);
   $('btn-rotate-animal').disabled = !(a && a.file);
   $('btn-adjust-animal').disabled = !(a && a.file);
-  // The print changed under an open Adjust (next animal, veto): close it.
+  // The animal changed under an open Adjust (next animal, veto): close it.
   if (adjuster && !(a && a.file === adjuster.file)) closeAdjust();
 }
 

@@ -15,7 +15,6 @@ Tests monkeypatch `_get_json` / `_get_bytes` — nothing here should be hit by
 the offline suite or the Docker build's test stage.
 """
 
-import contextlib
 import json
 import logging
 import os
@@ -768,11 +767,7 @@ def cached_animal() -> dict | None:
 
 
 def _resolve(slot: int, vetoed, img_path: Path) -> dict | None:
-    """The animal for a content slot, tried across its eligible collections
-    in the slot's rotation until one has a usable plate, whose image is
-    saved to `img_path`. The one selection rule — the panel (get_animal) and
-    the review page (upcoming_animals) both call it, so the review list is
-    what will actually hang."""
+    """The animal for a content slot, tried across its eligible collections in rotation until one has a usable plate."""
     common, latin, native, kind = ANIMALS[slot % len(ANIMALS)]
     eligible = [c for c in COLLECTIONS
                 if (c["kinds"] is None or kind in c["kinds"])
@@ -802,9 +797,7 @@ def get_animal(day: date | None = None, offset: int = 0,
     changes (1 = daily); `offset` advances the sequence — the pane's "next
     animal" button. `vetoed` holds Commons file titles: a vetoed image is
     never picked again, and the same animal is drawn from its next plate.
-    `keep` holds Commons file titles the user has reviewed or adjusted: a
-    slot the review page fetched ahead takes that image if it is one of
-    them, so what was reviewed is what hangs even if Commons has changed.
+    `keep` holds Commons file titles the user has reviewed or adjusted.
     """
     day = day or date.today()
     slot = slot_for(day, period_days, offset)
@@ -818,7 +811,7 @@ def get_animal(day: date | None = None, offset: int = 0,
             and (_cache_dir() / ANIMAL_IMG).exists()):
         return meta["data"]
 
-    data = _take_prefetched(slot, vetoed, set(keep)) or _resolve(slot, vetoed, _cache_dir() / ANIMAL_IMG)
+    data = _take_upcoming(slot, vetoed, set(keep)) or _resolve(slot, vetoed, _cache_dir() / ANIMAL_IMG)
     if data:
         data["for_date"] = day.isoformat()
         _cache_write("animal.json", {"fetched_at": time.time(), "data": data})
@@ -867,11 +860,8 @@ def _gave_up_recently(slot: int) -> bool:
                 and time.time() - meta.get("fetched_at", 0) < UPCOMING_RETRY_S)
 
 
-def _take_prefetched(slot: int, vetoed, keep) -> dict | None:
-    """The slot's prefetched animal, copied into the panel's own cache files —
-    only when the user reviewed or adjusted that image (its file is in
-    `keep`) and the slot still maps to that animal. None otherwise, and the
-    slot is resolved afresh, so later selection fixes still apply."""
+def _take_upcoming(slot: int, vetoed, keep) -> dict | None:
+    """Copied into the panel's cache; None unless its file is in `keep` and the slot still maps to that animal."""
     d = _stored_upcoming(slot, vetoed)
     if (not d or d.get("file") not in keep
             or d.get("common_name") != ANIMALS[slot % len(ANIMALS)][0]):
@@ -882,7 +872,7 @@ def _take_prefetched(slot: int, vetoed, keep) -> dict | None:
         tmp.write_bytes(Path(d["path"]).read_bytes())
         os.replace(tmp, dest)
     except OSError as e:
-        log.warning("could not take the prefetched animal for slot %d, "
+        log.warning("could not take the upcoming animal for slot %d, "
                     "fetching afresh: %s", slot, e)
         return None
     return {**d, "path": str(dest)}
@@ -903,39 +893,51 @@ def _fetch_upcoming(slot: int, vetoed) -> dict | None:
     return d
 
 
-def upcoming_animals(start: date, days: int, offset: int = 0, period_days: int = 1,
-                     vetoed=(), fetch: bool = True) -> list[dict]:
-    """The animals the panel will show from `start` for `days` days, in order:
-    one {"slot", "dates", "animal", "pending"} per content slot ("animal" is
-    None when no collection has a usable plate). Same slots (slot_for) and
-    same selection (_resolve) as get_animal; the slot on the panel now is
-    read from its cache rather than looked up again. With `fetch`, slots not
-    yet resolved are fetched one at a time (network-bound — call it off the
-    event loop); without, they come back None with "pending": True and
-    nothing touches the network."""
-    vetoed = set(vetoed)
+def _upcoming_slots(start: date, days: int, offset: int, period_days: int) -> dict[int, list[str]]:
     slots: dict[int, list[str]] = {}
     for i in range(max(0, days)):
         d = start + timedelta(days=i)
         slots.setdefault(slot_for(d, period_days, offset), []).append(d.isoformat())
+    return slots
+
+
+def _on_panel(current: dict | None, slot: int, vetoed) -> bool:
+    return bool(current and current.get("slot") == slot and current.get("file")
+                and current["file"] not in vetoed
+                and (_cache_dir() / ANIMAL_IMG).exists())
+
+
+def upcoming_animals(start: date, days: int, offset: int = 0, period_days: int = 1,
+                     vetoed=()) -> list[dict]:
+    """The animals from `start` for `days` days, one {"slot", "dates", "animal",
+    "pending"} per slot, read from the cache only (no lock, no network)."""
+    vetoed = set(vetoed)
     current = cached_animal()
     out = []
-    with _upcoming_lock if fetch else contextlib.nullcontext():
-        for slot, dates in slots.items():
-            pending = False
-            if (current and current.get("slot") == slot and current.get("file")
-                    and current["file"] not in vetoed
-                    and (_cache_dir() / ANIMAL_IMG).exists()):
-                animal = current
-            elif fetch:
-                animal = _fetch_upcoming(slot, vetoed)
-            else:
-                animal = _stored_upcoming(slot, vetoed)
-                pending = animal is None and not _gave_up_recently(slot)
-            out.append({"slot": slot, "dates": dates, "animal": animal, "pending": pending})
-        if fetch and slots:
-            _prune_upcoming(min(slots))
+    for slot, dates in _upcoming_slots(start, days, offset, period_days).items():
+        pending = False
+        if _on_panel(current, slot, vetoed):
+            animal = current
+        else:
+            animal = _stored_upcoming(slot, vetoed)
+            pending = animal is None and not _gave_up_recently(slot)
+        out.append({"slot": slot, "dates": dates, "animal": animal, "pending": pending})
     return out
+
+
+def fetch_upcoming(start: date, days: int, offset: int = 0, period_days: int = 1,
+                   vetoed=()) -> None:
+    """Resolve the missing slots one at a time (network-bound: call off the
+    event loop) and prune passed slots."""
+    vetoed = set(vetoed)
+    slots = _upcoming_slots(start, days, offset, period_days)
+    current = cached_animal()
+    with _upcoming_lock:
+        for slot in slots:
+            if not _on_panel(current, slot, vetoed):
+                _fetch_upcoming(slot, vetoed)
+        if slots:
+            _prune_upcoming(min(slots))
 
 
 def _prune_upcoming(before: int) -> None:
@@ -952,8 +954,7 @@ def _prune_upcoming(before: int) -> None:
 
 
 def find_animal(file: str) -> dict | None:
-    """An animal the panel shows now or the review page has fetched ahead,
-    by Commons file title — the image keys the pane may adjust."""
+    """An animal the panel shows now or the review page has upcoming, by Commons file title."""
     current = cached_animal()
     if current and current.get("file") == file and Path(current.get("path", "")).exists():
         return current

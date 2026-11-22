@@ -1,12 +1,7 @@
 // Adjust control: move and scale one image inside its art box, saved per
 // image. Shared by the pane (index.html) and the review page (review.html).
-//
-// The picture is always the server's: api/animal-preview.png draws the image
-// through the dashboard's own code at the panel's size and layout. While a
-// drag is in progress the last preview is nudged with a CSS transform so the
-// hand has something to follow; on release the server redraws it, and the
-// placement it reports back (X-Placement, clamped to the box; null for the
-// automatic fit) becomes the draft. All URLs are relative: the pages are
+// The picture is always the server's render, never a CSS imitation (CSS only
+// nudges it while a finger is down). All URLs are relative: the pages are
 // also served under a prefix.
 (function () {
   const DEFAULT = {x: 0, y: 0, scale: 1};

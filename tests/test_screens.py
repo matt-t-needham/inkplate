@@ -304,13 +304,12 @@ def test_image_settings_read_config_by_file():
            "image_placements": {"File:Gorilla.tif": {"x": 0.1, "y": 0, "scale": 1}}}
     other = screens.with_image_settings({"file": "File:Other.tif"}, cfg)
     assert (other["rotation"], other["placement"]) == (0, None)
-    screens.with_image_settings(a, cfg)
+    got = screens.with_image_settings(a, cfg)
+    assert (got["rotation"], got["placement"]) == (90, {"x": 0.1, "y": 0, "scale": 1})
     assert "rotation" not in a   # the cached dict is not mutated
 
 
 def test_placement_moves_only_its_own_image(data_dir, fake_data):
-    """A placement saved for another file leaves the dashboard pixel-for-pixel
-    as the automatic fit draws it; one saved for this file moves the art."""
     import state
     _figure_plate().save(fake_data["animal"]["path"])
     fake_data["animal"]["file"] = "File:Fox.tif"
@@ -326,7 +325,7 @@ def test_placement_moves_only_its_own_image(data_dir, fake_data):
 
 
 def test_placement_is_clamped_at_the_box_edge():
-    """The subject's centre may go up to the box edge, never past it, so a
+    """The subject's centre may go up to the box edge, never past it, so an
     image can't be pushed out of its own area; the placement reported back
     is the one drawn."""
     import tempfile

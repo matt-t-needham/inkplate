@@ -93,9 +93,7 @@ def test_image_rotations_validation(data_dir):
 
 
 def test_concurrent_mutations_to_different_keys_both_survive(data_dir):
-    """mutate loads, changes and saves under one lock: a second writer that
-    starts while the first is between its load and its save must not have
-    its change overwritten by the first's stale copy."""
+    """A writer that starts during another's load-save must not be overwritten."""
     import threading
     import time
     inside = threading.Event()

@@ -296,7 +296,7 @@ def test_review_marks_the_panel_image_and_round_trips_reviewed(client, fake_data
     _showing(fake_data)
     hare = {**fake_data["animal"], "file": "File:Hare.tif", "common_name": "hare"}
 
-    def upcoming(start, days, offset, period_days, vetoed, fetch=True):
+    def upcoming(*a, **k):
         return [{"slot": 1, "dates": ["2026-11-21"], "animal": fake_data["animal"],
                  "pending": False},
                 {"slot": 2, "dates": ["2026-11-22"], "animal": hare, "pending": False}]

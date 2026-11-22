@@ -123,7 +123,7 @@ def _animal_summary(a: dict, cfg: dict) -> dict:
 
 async def _target_animal(body: dict) -> dict:
     """The animal a per-image action is for: body["file"] when given (it must
-    be on the panel or fetched ahead by the review page), else the one on
+    be on the panel or upcoming on the review page), else the one on
     the panel now. 404/409 when there is no such animal."""
     f = body.get("file")
     if f is not None:
@@ -277,9 +277,7 @@ async def api_placement(request: Request):
 
 @app.post("/api/mark-reviewed")
 async def api_mark_reviewed(request: Request):
-    """Mark an image reviewed (or not) on the review page: {file, reviewed}.
-    `file` is required, unlike the other per-image actions: the mark is only
-    ever set from the review list, never for "whatever is on the panel"."""
+    """Mark an image reviewed (or not) on the review page: {file, reviewed}."""
     body = await request.json()
     if not isinstance(body.get("file"), str):
         raise HTTPException(400, "file is required")
@@ -292,6 +290,7 @@ async def api_mark_reviewed(request: Request):
 
 
 REVIEW_DAYS = 14
+REVIEW_MAX_DAYS = 60
 
 
 # The background fetch of upcoming animals the review page is waiting on.
@@ -309,7 +308,7 @@ def _fetch_upcoming_in_background(args: tuple) -> None:
 
     async def run():
         try:
-            await asyncio.to_thread(datasources.upcoming_animals, *args, fetch=True)
+            await asyncio.to_thread(datasources.fetch_upcoming, *args)
         except Exception as e:
             log.error("fetching upcoming animals failed: %s", e, exc_info=True)
     _upcoming_fetch = asyncio.create_task(run())
@@ -322,10 +321,10 @@ async def api_review(days: int = REVIEW_DAYS):
     from the cache: a slot not fetched yet is "pending" and is fetched in
     the background for the page's next poll."""
     cfg = state.load_config()
-    args = (date.today(), min(max(days, 1), 60), cfg["animal_offset"],
+    args = (date.today(), min(max(days, 1), REVIEW_MAX_DAYS), cfg["animal_offset"],
             cfg["animal_period_days"], cfg["vetoed_images"])
     try:
-        items = await asyncio.to_thread(datasources.upcoming_animals, *args, fetch=False)
+        items = await asyncio.to_thread(datasources.upcoming_animals, *args)
     except Exception as e:
         log.error("reading upcoming animals failed: %s", e, exc_info=True)
         raise HTTPException(500, f"could not read the upcoming animals: {e}")
@@ -386,7 +385,6 @@ async def api_animal_preview(file: str, x: float | None = None, y: float | None 
     return Response(png, media_type="image/png",
                     headers={"Cache-Control": "no-store",
                              "X-Placement": json.dumps(placed)})
-
 
 
 @app.get("/api/preview.png")

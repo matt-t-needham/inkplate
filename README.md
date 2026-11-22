@@ -93,7 +93,7 @@ docker logs apps-inkplate-1 -f
   file for good (the animal stays in rotation, drawn from another plate).
   It can't be undone from the pane. **Rotate** turns a plate scanned
   sideways; **Adjust** moves and scales the print within its own area
-  (drag, scale slider, Reset to automatic, Save) — both remembered for that
+  — both remembered for that
   image.
 - **Review upcoming prints** (`/review`) — the next 14 days' prints in the
   order they will hang, each with its preview and the same move/scale,

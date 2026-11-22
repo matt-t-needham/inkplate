@@ -194,13 +194,9 @@ The automatic crop gets most plates right but not all (a mount card, a
 figure that wants to sit lower). **Placement** is a per-image correction,
 stored like rotation: config `image_placements`, keyed by Commons file,
 `{x, y, scale}`. It is applied *after* the automatic trim/crop/fit, inside
-the same art box: scale about the subject's centre, then shift by a share of
-the box (`screens._place`). Pixels are resampled from the sheet, not the
-fitted bitmap, so a zoom stays sharp, and the fades are recomputed for the
-new rectangle. Stored values are capped (shift ±1 box, scale 0.5–2.5×) and
-the drawn subject centre is kept inside the box, so a print can't leave its
-area. No entry means the automatic fit, pixel for pixel (checked against the
-previous code on every layout).
+the same art box (`screens._place`). Stored values are capped and the drawn
+subject centre is kept inside the box, so a print can't leave its area. No
+entry means the automatic fit, pixel for pixel.
 
 The pane's **Adjust** and the **review page** (`/review`) share
 `static/placement.js`; its picture is always a server render
@@ -215,11 +211,10 @@ the panel's own `animal.*`. `/api/review` answers at once from that cache and
 fetches missing slots in the background (a cold 14-day fetch can outlast
 Cloudflare's 100 s timeout); the page re-polls while any are pending.
 
-**When its day comes, the panel takes the prefetched print only if Matt
+**When its day comes, the panel takes the upcoming print only if Matt
 touched it** — marked it reviewed, or saved a placement or rotation for it —
 and the slot still maps to that animal. So what was reviewed is what hangs
-even if Commons changes in between, but an untouched prefetch (up to 28 days
-ahead) is resolved afresh, so selection-filter fixes made meanwhile still
+even if Commons changes in between, but an untouched upcoming print is resolved afresh, so selection-filter fixes made meanwhile still
 apply to it. `reviewed_images` in config records what has been worked
 through. Old placements and reviewed marks are not pruned: one short entry
 per image, a few hundred a year at most.

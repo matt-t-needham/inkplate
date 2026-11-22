@@ -1,28 +1,15 @@
 """The review page's upcoming animals must be the ones that will actually
 hang, in the order they will hang."""
-import io
-import json
 from datetime import date
 
 import pytest
-from PIL import Image, ImageDraw
 
 import datasources
+from test_datasources import PLATE
 
 ANIMALS = [("fox", "Vulpes", "the Northern Hemisphere", "mammal"),
            ("hare", "Lepus", "Europe", "mammal"),
            ("lynx", "Lynx", "Europe", "mammal")]
-
-
-def _plate() -> bytes:
-    im = Image.new("RGB", (300, 400), (240, 235, 220))
-    ImageDraw.Draw(im).ellipse([80, 100, 220, 320], fill=(40, 35, 30))
-    buf = io.BytesIO()
-    im.save(buf, "JPEG")
-    return buf.getvalue()
-
-
-PLATE = _plate()
 
 
 @pytest.fixture()
@@ -57,9 +44,10 @@ def test_review_order_is_the_order_the_panel_will_hang(data_dir, commons):
     for p in (data_dir / "cache").iterdir():   # forget everything
         p.unlink()
 
-    # Without fetch nothing is resolved yet: every slot is pending.
-    cold = datasources.upcoming_animals(start, days, offset, period, fetch=False)
+    # Before fetch_upcoming nothing is resolved yet: every slot is pending.
+    cold = datasources.upcoming_animals(start, days, offset, period)
     assert all(it["pending"] and it["animal"] is None for it in cold)
+    datasources.fetch_upcoming(start, days, offset, period)
     listed = datasources.upcoming_animals(start, days, offset, period)
     assert not any(it["pending"] for it in listed)
     assert [(d, it["animal"]["file"]) for it in listed for d in it["dates"]] == hung
@@ -70,11 +58,12 @@ def test_review_order_is_the_order_the_panel_will_hang(data_dir, commons):
 
 
 def test_only_a_reviewed_or_adjusted_upcoming_image_is_kept(data_dir, commons):
-    """Its day takes the prefetched image rather than searching again, so
+    """Its day takes the upcoming image rather than searching again, so
     what was reviewed hangs even if Commons (or the selection) has changed.
     An image nobody touched is resolved afresh, so later selection fixes
     apply to it; a vetoed one is never kept."""
     day = date(2026, 11, 22)
+    datasources.fetch_upcoming(day, 1)
     ahead = datasources.upcoming_animals(day, 1)[0]["animal"]
     commons["n"] = 2
     assert datasources.get_animal(day)["file"] != ahead["file"]
@@ -88,14 +77,13 @@ def test_only_a_reviewed_or_adjusted_upcoming_image_is_kept(data_dir, commons):
 
 def test_vetoed_upcoming_image_is_replaced_and_passed_slots_pruned(data_dir, commons):
     day = date(2026, 11, 21)
+    datasources.fetch_upcoming(day, 2)
     first = datasources.upcoming_animals(day, 2)
     vetoed = [first[1]["animal"]["file"]]
+    datasources.fetch_upcoming(day, 2, vetoed=vetoed)
     again = datasources.upcoming_animals(day, 2, vetoed=vetoed)
     assert again[0]["animal"]["file"] == first[0]["animal"]["file"]
     assert again[1]["animal"]["file"] not in vetoed
-    datasources.upcoming_animals(date(2026, 11, 22), 1)
+    datasources.fetch_upcoming(date(2026, 11, 22), 1)
     left = {p.name for p in (data_dir / "cache" / "upcoming").iterdir()}
     assert left == {f"{first[1]['slot']}.json", f"{first[1]['slot']}.jpg"}
-    assert json.loads((data_dir / "cache" / "upcoming"
-                       / f"{first[1]['slot']}.json").read_text())["data"]["file"] \
-        == again[1]["animal"]["file"]

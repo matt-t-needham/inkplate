@@ -470,13 +470,6 @@ def normalize_placement(p) -> dict | None:
     return None if out == DEFAULT_PLACEMENT else out
 
 
-def kept_images(cfg: dict) -> set[str]:
-    """Commons files the user has reviewed or adjusted: a prefetched one is
-    what hangs on its day (DECISIONS §25)."""
-    return (set(cfg.get("reviewed_images") or []) | set(cfg.get("image_placements") or {})
-            | set(cfg.get("image_rotations") or {}))
-
-
 def _dashboard_data(cfg: dict) -> dict:
     """Every source the dashboard draws from, each independently optional."""
     return {
@@ -485,7 +478,7 @@ def _dashboard_data(cfg: dict) -> dict:
             datasources.get_animal(offset=cfg["animal_offset"],
                                    period_days=cfg["animal_period_days"],
                                    vetoed=cfg["vetoed_images"],
-                                   keep=kept_images(cfg)),
+                                   keep={*cfg["reviewed_images"], *cfg["image_placements"], *cfg["image_rotations"]}),
             cfg),
         "snow": (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
                  if cfg["show_snow"] else None),
@@ -528,8 +521,7 @@ def _hero_rows(height: int, Y, snow: bool) -> tuple[int, int]:
 def art_box(width: int, height: int, layout: str | None, snow: bool):
     """Where the dashboard draws the art, for this frame size, portrait
     layout (ignored in landscape) and snow row: ((x0, y0, x1, y1), mode) for
-    _draw_art. The one definition the layouts and the pane's placement
-    preview share."""
+    _draw_art."""
     if height > width:
         X, Y = _scalers(width, height, PORTRAIT)
         layout = layout if layout in PORTRAIT_LAYOUTS else DEFAULT_PORTRAIT_LAYOUT

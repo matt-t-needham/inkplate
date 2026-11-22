@@ -175,7 +175,7 @@ function itemHtml(it, i) {
     <div class="sub">${esc(subLine(a))}</div>
     <div class="file">${esc(a.file)}</div>
     <div class="body">
-      <div class="adj-slot" data-file="${esc(a.file)}"></div>
+      <div class="adj-mount" data-file="${esc(a.file)}"></div>
       <div class="acts">
         <button type="button" data-act="reviewed">${a.reviewed ? 'Mark not reviewed' : 'Mark reviewed'}</button>
         <button type="button" data-act="rotate" title="Turn the plate a quarter clockwise, for a scan bound in sideways">Rotate</button>
@@ -194,7 +194,7 @@ function draw() {
   $('list').innerHTML = shown.length ? shown.map(([it, i]) => itemHtml(it, i)).join('')
     : `<div class="empty">${items.length ? 'Everything in this stretch is reviewed.'
                                          : 'Nothing upcoming.'}</div>`;
-  $('list').querySelectorAll('.adj-slot').forEach(el => io.observe(el));
+  $('list').querySelectorAll('.adj-mount').forEach(el => io.observe(el));
   drawCounts();
 }
 
@@ -230,8 +230,8 @@ async function poll() {
       if (!card) return;
       if (hidden(n)) { card.remove(); return; }
       card.outerHTML = itemHtml(n, i);
-      const slot = $('list').querySelector(`.item[data-i="${i}"] .adj-slot`);
-      if (slot) io.observe(slot);
+      const mount = $('list').querySelector(`.item[data-i="${i}"] .adj-mount`);
+      if (mount) io.observe(mount);
     });
     drawCounts();
   }
