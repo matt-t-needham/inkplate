@@ -279,40 +279,87 @@ def test_placement_rejects_unknown_images_and_junk(client, fake_data):
     assert client.post("/api/placement", json={"layout": "sideways", "x": 0.1}).status_code == 400
 
 
-def test_animal_preview_reports_the_clamped_placement(client, fake_data):
+def _layers(client, **params):
+    import base64
+    r = client.get("/api/page-layers", params={"file": "File:Fox.tif", **params})
+    assert r.status_code == 200, r.text
+    j = r.json()
+
+    def img(uri):
+        return Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1]))).convert("RGBA")
+    return j, img(j["page"]), img(j["art"]["image"])
+
+
+def _composed(j, page, art):
+    """What the browser shows while a finger is down: paper, the art clipped
+    to the box, the page over it (the box's CSS fades left out)."""
+    f = page.width / j["size"][0]
+    canvas = Image.new("RGBA", page.size, j["paper"])
+    x0, y0, x1, y1 = (round(v * f) for v in j["art"]["rect"])
+    layer = Image.new("RGBA", page.size, (0, 0, 0, 0))
+    layer.paste(art.resize((x1 - x0, y1 - y0)), (x0, y0))
+    clip = Image.new("L", page.size, 0)
+    clip.paste(255, tuple(round(v * f) for v in j["box"]))
+    layer.putalpha(Image.composite(layer.getchannel("A"), clip, clip))
+    return Image.alpha_composite(Image.alpha_composite(canvas, layer), page).convert("RGB")
+
+
+def _mean_diff(a, b):
+    from PIL import ImageChops, ImageStat
+    return sum(ImageStat.Stat(ImageChops.difference(a, b)).mean) / 3
+
+
+def test_page_layers_compose_to_the_render_at_the_saved_placement(client, fake_data):
+    """The layers the live drag moves are the page the panel draws: for a
+    saved placement (pushed past the box, so the centre clamp applies), the
+    box and placement match what the full render uses, and paper + art +
+    page composes to that render (in the simulation's tones). The art moved by the placement shift
+    a drag would apply no longer does, so the comparison can tell."""
     import json
     _showing(fake_data)
-    r = client.get("/api/animal-preview.png", params={"file": "File:Fox.tif", "x": 5,
-                                                      "mode": "raw"})
-    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
-    placed = json.loads(r.headers["X-Placement"])
-    assert 0 < placed["x"] < 1        # stored range caps at 1; the box edge sooner
-    # The preview is the art box of the layout asked for, else the panel's
-    # own (portrait hero).
-    def aspect(r):
-        w, h = Image.open(io.BytesIO(r.content)).size
-        return w / h
-    box, _ = screens.art_box(1200, 1600, "hero", True)
-    assert abs(aspect(r) - (box[2] - box[0]) / (box[3] - box[1])) < 0.01
-    r = client.get("/api/animal-preview.png", params={"file": "File:Fox.tif",
-                                                      "layout": "landscape", "mode": "raw"})
-    box, _ = screens.art_box(1600, 1200, "landscape", True)
-    assert abs(aspect(r) - (box[2] - box[0]) / (box[3] - box[1])) < 0.01
-    assert client.get("/api/animal-preview.png", params={"file": "File:Nope.tif"}).status_code == 404
+    for screen, layout in (("dashboard", "hero"), ("daily", "daily")):
+        client.post("/api/placement", json={"layout": layout, "x": 5, "y": -0.1,
+                                            "scale": 1.3})
+        r = client.get("/api/page-preview.png", params={"file": "File:Fox.tif", "screen": screen})
+        j, page, art = _layers(client, screen=screen)
+        w, h = j["size"]
+        assert j["layout"] == layout
+        assert [j["box"][0] / w, j["box"][1] / h, j["box"][2] / w, j["box"][3] / h] == \
+            pytest.approx(json.loads(r.headers["X-Art-Box"]), abs=1e-3)
+        assert j["placement"] == json.loads(r.headers["X-Placement"])
+        assert 0 < j["placement"]["x"] < 1        # stored range caps at 1; the box edge sooner
+        # The centre the browser clamps against: placement x of the box from auto.
+        bw = j["box"][2] - j["box"][0]
+        assert j["art"]["centre"][0] == pytest.approx(j["auto"][0] + j["placement"]["x"] * bw, abs=1)
+
+        raw, _, _ = screens.page_preview(screen, screens.with_image_settings(
+            {**fake_data["animal"]}, state.load_config()), state.load_config(), (w, h))
+        raw = palette.simulate_tones(raw.resize(page.size, Image.LANCZOS))
+        assert _mean_diff(_composed(j, page, art), raw) < 1.5, screen
+        shifted = {**j, "art": {**j["art"], "rect": [
+            v + (0.1 * bw if i % 2 == 0 else 0) for i, v in enumerate(j["art"]["rect"])]}}
+        assert _mean_diff(_composed(shifted, page, art), raw) > 3, screen
 
 
-def test_daily_screen_adjusts_its_own_layout_in_the_panels_orientation(client, fake_data):
-    """With the daily screen up, Adjust and the review page place prints in
-    the daily layout, previewed at the panel's current orientation."""
+def test_page_layers_refuse_prints_outside_the_queue(client, fake_data):
+    _showing(fake_data)
+    assert client.get("/api/page-layers", params={"file": "File:Nope.tif"}).status_code == 404
+    assert client.get("/api/page-layers", params={"file": "File:Fox.tif",
+                                                   "screen": "palette_test"}).status_code == 400
+
+
+def test_daily_screen_places_its_own_layout_in_the_panels_orientation(client, fake_data):
+    """With the daily screen up, dragging places prints in the daily
+    layout, at the panel's current orientation."""
     _showing(fake_data)
     for rotation, size in ((90, (1200, 1600)), (0, (1600, 1200))):
         client.post("/api/config", json={"screen": "daily", "rotation": rotation})
         assert client.get("/api/state").json()["art_layout"] == {"key": "daily",
                                                                  "name": "daily view"}
-        r = client.get("/api/animal-preview.png", params={"file": "File:Fox.tif", "mode": "raw"})
-        w, h = Image.open(io.BytesIO(r.content)).size
+        j, _, _ = _layers(client)
+        assert j["size"] == list(size)
         box, _ = screens.art_box(*size, "daily", True)
-        assert abs(w / h - (box[2] - box[0]) / (box[3] - box[1])) < 0.01
+        assert j["box"] == list(box)
 
 
 def test_review_queue_opens_at_the_first_unreviewed_and_moving_on_keeps_placement(

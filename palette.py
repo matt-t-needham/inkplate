@@ -77,3 +77,42 @@ def simulate_panel(dithered: Image.Image) -> Image.Image:
     sim = dithered.copy()
     sim.putpalette(flat)
     return sim.convert("RGB")
+
+
+def _sim_matrix() -> tuple[float, ...]:
+    """The affine colour map (a 12-tuple for Image.convert) that best takes
+    each DITHER_PALETTE colour to its PANEL_SIM_PALETTE tone, by weighted
+    least squares: paper and black, most of any page, weigh most, so they
+    come out all but exact."""
+    rows = [(*rgb, 255) for rgb in DITHER_PALETTE]
+    weights = [50 if rgb in ((0, 0, 0), (255, 255, 255)) else 1 for rgb in DITHER_PALETTE]
+    out: list[float] = []
+    for c in range(3):
+        # Normal equations, 4x4, solved by Gauss-Jordan elimination.
+        m = [[sum(w * r[i] * r[j] for r, w in zip(rows, weights)) for j in range(4)]
+             + [sum(w * r[i] * t[c] for r, t, w in zip(rows, PANEL_SIM_PALETTE, weights))]
+             for i in range(4)]
+        for i in range(4):
+            p = max(range(i, 4), key=lambda k: abs(m[k][i]))
+            m[i], m[p] = m[p], m[i]
+            for k in range(4):
+                if k != i:
+                    f = m[k][i] / m[i][i]
+                    m[k] = [a - f * b for a, b in zip(m[k], m[i])]
+        r, g, b, k = (m[i][4] / m[i][i] for i in range(4))
+        out += [r, g, b, k * 255]
+    return tuple(out)
+
+
+SIM_MATRIX = _sim_matrix()
+
+
+def simulate_tones(img: Image.Image) -> Image.Image:
+    """An undithered RGB or RGBA image in the panel simulation's muted
+    tones (alpha kept): what the pane shows while the print is dragged,
+    before the real dithered picture comes back."""
+    if img.mode == "RGBA":
+        out = img.convert("RGB").convert("RGB", SIM_MATRIX)
+        out.putalpha(img.getchannel("A"))
+        return out
+    return img.convert("RGB", SIM_MATRIX)

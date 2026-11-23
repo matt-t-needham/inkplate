@@ -65,7 +65,7 @@ DEFAULT_CONFIG = {
     # Per-image rotation (clockwise degrees, keyed by Commons file title)
     # for plates scanned sideways. Only non-zero entries are kept.
     "image_rotations": {},
-    # Per-image placement inside an art box (pane Adjust / review page):
+    # Per-image placement inside an art box (dragged on the pane or the review page):
     # {Commons file title: {art layout: {"x", "y", "scale"}}}, the layout
     # being a screens.art_box key ("landscape", "hero", ...); see
     # screens.normalize_placement. Only non-automatic entries are kept.

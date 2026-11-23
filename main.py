@@ -10,6 +10,7 @@ behind the metrics nginx prefix (:9000/inkplate/).
 """
 
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from PIL import Image
 
 import config
 
@@ -104,8 +106,8 @@ async def api_state():
 
 
 def _art_layout(cfg: dict) -> dict:
-    """The art layout the panel draws now: the one the pane's Adjust and the
-    review page place prints for."""
+    """The art layout the panel draws now: the one dragging the print on the
+    pane places it in."""
     key = screens.panel_layout(cfg, renderer.upright_size(cfg["rotation"]))
     return {"key": key, "name": screens.ART_LAYOUT_NAMES.get(key, key)}
 
@@ -118,14 +120,6 @@ def _layout_param(v, cfg: dict) -> str:
     if v not in screens.ART_LAYOUTS:
         raise HTTPException(400, f"layout must be one of {', '.join(screens.ART_LAYOUTS)}")
     return v
-
-
-def _layout_size(layout: str, cfg: dict) -> tuple[int, int]:
-    """The frame size an art layout is drawn at. The daily view's layout is
-    used in either orientation, so it takes the panel's current one."""
-    if layout == screens.DAILY_LAYOUT:
-        return renderer.upright_size(cfg["rotation"])
-    return renderer.upright_size(0 if layout == screens.LANDSCAPE_LAYOUT else 90)
 
 
 def _current(cfg: dict | None = None) -> dict:
@@ -386,27 +380,16 @@ async def api_review():
             "reviewed": sum(1 for a in animals if a["reviewed"])}
 
 
-PREVIEW_MAX = 900        # px, the long side of an animal preview
-PAGE_PREVIEW_MAX = 1200  # px, the long side of a whole-page preview
+PAGE_PREVIEW_MAX = 1200  # px, the long side of a whole-page preview or its layers
 
 
-async def _previewed_animal(file: str, cfg: dict, layout: str, x, y, scale) -> dict:
-    """The animal a preview draws, with its saved settings, and with x/y/
-    scale (an unsaved draft from the Adjust control) for `layout` when any
-    is given. 404 unless the file is on the panel or in the review queue."""
+async def _previewed_animal(file: str, cfg: dict) -> dict:
+    """The animal a preview draws, with its saved settings. 404 unless the
+    file is on the panel or in the review queue."""
     a = await asyncio.to_thread(datasources.find_animal, file)
     if not a:
         raise HTTPException(404, "no such image on the panel or in the review list")
-    animal = screens.with_image_settings(a, cfg)
-    if x is not None or y is not None or scale is not None:
-        saved = animal["placements"].get(layout) or screens.DEFAULT_PLACEMENT
-        draft = {"x": saved["x"] if x is None else x, "y": saved["y"] if y is None else y,
-                 "scale": saved["scale"] if scale is None else scale}
-        try:
-            animal["placements"][layout] = screens.normalize_placement(draft)
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-    return animal
+    return screens.with_image_settings(a, cfg)
 
 
 def _png(img) -> bytes:
@@ -415,57 +398,34 @@ def _png(img) -> bytes:
     return buf.getvalue()
 
 
-@app.get("/api/animal-preview.png")
-async def api_animal_preview(file: str, layout: str | None = None,
-                             x: float | None = None, y: float | None = None,
-                             scale: float | None = None, mode: str = "panel"):
-    """One image alone in one layout's art box (default: the panel's
-    current layout), drawn by the dashboard's own code at that layout's
-    size — with the placement saved for that layout, or with x/y/scale when
-    given (an unsaved draft from the Adjust control). mode "panel" is
-    dithered to the six inks and shown as the panel will; "raw" is the RGB.
-    The placement actually drawn (clamped to the box) is in X-Placement."""
-    if mode not in ("raw", "panel"):
-        raise HTTPException(400, "mode must be raw|panel")
-    cfg = state.load_config()
-    layout = _layout_param(layout, cfg)
-    animal = await _previewed_animal(file, cfg, layout, x, y, scale)
-
-    def draw():
-        img, placed = screens.art_preview(animal, cfg, layout, _layout_size(layout, cfg))
-        if mode == "panel":
-            img = palette.simulate_panel(palette.dither_to_spectra(img))
-        img.thumbnail((PREVIEW_MAX, PREVIEW_MAX))
-        return _png(img), placed
-    try:
-        png, placed = await asyncio.to_thread(draw)
-    except Exception as e:
-        log.error("animal preview failed for %s: %s", file, e, exc_info=True)
-        raise HTTPException(500, f"preview failed: {e}")
-    return Response(png, media_type="image/png",
-                    headers={"Cache-Control": "no-store",
-                             "X-Placement": json.dumps(placed)})
+def _webp_uri(img, lossless: bool) -> str:
+    buf = io.BytesIO()
+    img.save(buf, "WEBP", lossless=lossless, quality=85 if not lossless else 80)
+    return "data:image/webp;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-@app.get("/api/page-preview.png")
-async def api_page_preview(file: str, screen: str | None = None,
-                           x: float | None = None, y: float | None = None,
-                           scale: float | None = None):
-    """The whole page `screen` (dashboard or daily; default: the panel's)
-    will hang with this print in place of today's, at the panel's current
-    orientation, drawn by the screen's own code (screens.page_preview) and
-    shown as the panel will (dithered to the six inks). x/y/scale are an
-    unsaved draft of the print's placement in that screen's art layout.
-    Headers: X-Placement (as drawn, clamped), X-Layout (the art layout),
-    X-Art-Box (the art box as [x0, y0, x1, y1] shares of the page, which
-    the review page maps a drag on the print through)."""
-    cfg = state.load_config()
+def _preview_screen(screen: str | None, cfg: dict) -> tuple[str, tuple[int, int], str]:
+    """A preview's screen (default: the panel's print screen; 400 unless it
+    hangs a print), the panel's upright size and the art layout it uses."""
     screen = screen or _print_screen(cfg)
     if screen not in screens.PRINT_SCREENS:
         raise HTTPException(400, f"screen must be one of {', '.join(screens.PRINT_SCREENS)}")
     size = renderer.upright_size(cfg["rotation"])
-    layout = screens.panel_layout({**cfg, "screen": screen}, size)
-    animal = await _previewed_animal(file, cfg, layout, x, y, scale)
+    return screen, size, screens.panel_layout({**cfg, "screen": screen}, size)
+
+
+@app.get("/api/page-preview.png")
+async def api_page_preview(file: str, screen: str | None = None):
+    """The whole page `screen` (dashboard or daily; default: the panel's)
+    will hang with this print, with its saved placement, in place of
+    today's, at the panel's current orientation, drawn by the screen's own
+    code (screens.page_preview) and shown as the panel will (dithered to the
+    six inks). Headers: X-Placement (as drawn, clamped), X-Layout (the art
+    layout), X-Art-Box (the art box as [x0, y0, x1, y1] shares of the
+    page)."""
+    cfg = state.load_config()
+    screen, size, layout = _preview_screen(screen, cfg)
+    animal = await _previewed_animal(file, cfg)
 
     def draw():
         img, box, placed = screens.page_preview(screen, animal, cfg, size)
@@ -484,6 +444,42 @@ async def api_page_preview(file: str, screen: str | None = None,
                     headers={"Cache-Control": "no-store", "X-Layout": layout,
                              "X-Art-Box": json.dumps(share),
                              "X-Placement": json.dumps(placed)})
+
+
+@app.get("/api/page-layers")
+async def api_page_layers(file: str, screen: str | None = None):
+    """The page `screen` would hang with this print (as page-preview draws
+    it, undithered), split into layers for the pane and the review page to
+    move and scale the print live under a finger (screens.page_layers,
+    DECISIONS §29): "page" (everything but the art, transparent over it)
+    and "art" (the plate, unclipped, with its "rect" and "centre") as
+    data: URIs in the panel simulation's tones, "paper" (the colour under
+    them), "box", "fades", "auto" and "placement" in frame px of "size",
+    the panel's upright frame, and "limits" (the placement clamp)."""
+    cfg = state.load_config()
+    screen, size, layout = _preview_screen(screen, cfg)
+    animal = await _previewed_animal(file, cfg)
+
+    def draw():
+        out = screens.page_layers(screen, animal, cfg, size, PAGE_PREVIEW_MAX)
+        # In the panel simulation's tones, on its paper, like the picture
+        # at rest (which is dithered too; the layers are not).
+        out["page"] = _webp_uri(palette.simulate_tones(out["page"]), lossless=True)
+        if out["art"]:
+            out["art"]["image"] = _webp_uri(palette.simulate_tones(out["art"]["image"]),
+                                            lossless=False)
+        out["paper"] = "#%02x%02x%02x" % palette.simulate_tones(
+            Image.new("RGB", (1, 1), (255, 255, 255))).getpixel((0, 0))
+        return out
+    try:
+        out = await asyncio.to_thread(draw)
+    except Exception as e:
+        log.error("page layers failed for %s on %s: %s", file, screen, e, exc_info=True)
+        raise HTTPException(500, f"layers failed: {e}")
+    return JSONResponse(out | {"screen": screen, "layout": layout, "size": list(size),
+                               "limits": {"shift": screens.PLACEMENT_SHIFT,
+                                          "scale": list(screens.PLACEMENT_SCALE)}},
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/preview.png")

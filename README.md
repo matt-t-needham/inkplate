@@ -92,11 +92,13 @@ docker logs apps-inkplate-1 -f
 - **Now showing** — the current animal. **Veto image** bans that Commons
   file for good (the animal stays in rotation, drawn from another plate).
   It can't be undone from the pane. **Rotate** turns a plate scanned
-  sideways (remembered for that image); **Adjust** moves and scales the
-  print within its own area, remembered for that image *in the layout the
-  panel is using* (landscape, portrait hero or portrait stack each keep
-  their own). Changes save themselves when a drag or the slider is
-  released.
+  sideways (remembered for that image).
+- **The preview** — grab the print on it and drag to move it within its own
+  area; pinch, ctrl/cmd + scroll, or *Smaller* / *Larger* to resize it. It
+  moves live and saves itself on release, remembered for that image *in the
+  layout the panel is using* (landscape, portrait hero, portrait stack or
+  the daily view each keep their own); the real panel picture then comes
+  back in its place. *Reset to automatic* undoes it.
 - **Review upcoming prints** (`/review`) — a queue of the next 28 days'
   prints in the order they will hang, one at a time, opening at the first
   not yet reviewed. Each is shown on the whole page it will hang on
