@@ -221,8 +221,10 @@ function mountPreview(st) {
     onSaved: () => loadState(),
   });
 }
+// Reload the drag layers too: a config change (snow, location) can move the
+// art box, and dragging against stale layers would save a different spot.
 function refreshPreviewImg() {
-  if (pane) pane.refresh();
+  if (pane) pane.reload();
 }
 
 $('btn-render').addEventListener('click', async () => {
