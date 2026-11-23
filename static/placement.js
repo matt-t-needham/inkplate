@@ -94,6 +94,7 @@
     let draft = {...DEFAULT, ...(opts.placement || {})};
     let seq = 0, saveSeq = 0, saving = Promise.resolve(), committing = Promise.resolve();
     let saved = true, objectUrl = null, drag = null, nudgeTimer = null, gone = false;
+    let nudge = {x: 0, y: 0};   // arrow-key moves not yet drawn by the server
 
     const stageHtml = `
       <div class="adj-stage${opts.fit ? ' fit' : ''}">
@@ -189,6 +190,7 @@
         frame.style.setProperty('--ar', page.naturalWidth / page.naturalHeight);
         setBox(artBox);
         feedback(null);
+        nudge = {x: 0, y: 0};
         draft = {...draft, x: placed.x, y: placed.y};
         sync();
       } catch (e) {
@@ -257,9 +259,13 @@
       if (!step) return;
       e.preventDefault();
       draft = {...draft, x: draft.x + step[0], y: draft.y + step[1]};
-      sync(); render();
+      nudge = {x: nudge.x + step[0], y: nudge.y + step[1]};
+      sync();
+      // Feedback only: a held key would otherwise ask the server for a
+      // full-page render per repeat. One render and save once they pause.
+      feedback(`translate(${nudge.x * box.clientWidth}px, ${nudge.y * box.clientHeight}px)`);
       clearTimeout(nudgeTimer);
-      nudgeTimer = setTimeout(save, NUDGE_SAVE_MS);
+      nudgeTimer = setTimeout(() => { nudgeTimer = null; commit(); }, NUDGE_SAVE_MS);
     });
 
     range.addEventListener('input', () => {

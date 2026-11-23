@@ -335,8 +335,12 @@ function apply(j, first) {
 
 async function poll() {
   if (busy) { pollTimer = setTimeout(poll, POLL_MS); return; }
-  try { apply(await fetchReview(), false); }
-  catch (e) {
+  try {
+    const j = await fetchReview();
+    // Next or Previous may have started while this was in flight.
+    if (busy) { pollTimer = setTimeout(poll, POLL_MS); return; }
+    apply(j, false);
+  } catch (e) {
     toast('Could not check for fetched prints: ' + e.message, true);
     pollTimer = setTimeout(poll, POLL_MS);
   }

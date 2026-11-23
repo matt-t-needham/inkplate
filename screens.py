@@ -823,7 +823,9 @@ def _art_mask(art: Image.Image, x: int, y: int, box, frame, mode: str, X, Y) -> 
     Dashboard art fades from its own edges: the hero's soft HERO_FADE hides
     a crop line, the bleed layouts' long left fade lets the weather sit
     over it. Daily art fades in only from its box's inner left edge, where
-    it meets the calendar, wherever the art itself starts (DECISIONS §26)."""
+    it meets the calendar, wherever the art itself starts (DECISIONS §26);
+    its other sides never fade, so a daily placement shrunk below the box
+    shows hard edges there."""
     W, H = frame
     w, h = art.size
     if mode == "daily":
