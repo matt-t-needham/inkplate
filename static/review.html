@@ -16,36 +16,33 @@
     display: flex; flex-direction: column;
   }
   header {
-    flex: none; padding: calc(env(safe-area-inset-top) + 14px) 16px 12px;
+    flex: none; padding: calc(env(safe-area-inset-top) + 10px) 16px 8px;
     border-bottom: 1px solid var(--bix-border, #313244);
   }
-  h1 { font-weight: 300; letter-spacing: -.035em; line-height: 1.08; font-size: 1.9rem;
-       margin: 8px 0 4px; }
-  .lede { margin: 0 0 12px; color: var(--bix-text-soft, #a6adc8); font-size: .9rem; max-width: 60ch; }
-  .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .counts { font-family: var(--bix-mono, ui-monospace, Menlo, monospace); font-size: .85rem;
-            color: var(--bix-text-soft, #a6adc8); font-variant-numeric: tabular-nums; }
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+          margin-top: 4px; }
+  h1 { font-weight: 300; letter-spacing: -.035em; line-height: 1.08; font-size: 1.5rem; margin: 0; }
+  .counts { font-family: var(--bix-mono, ui-monospace, Menlo, monospace); font-size: .8rem;
+            color: var(--bix-text-soft, #a6adc8); font-variant-numeric: tabular-nums;
+            white-space: nowrap; }
   .counts b { color: var(--bix-text, #cdd6f4); font-weight: 500; }
-  .bar label { display: flex; align-items: center; gap: 8px; min-height: var(--tap);
-               color: var(--bix-text-soft, #a6adc8); font-size: .9rem; }
-  .bar input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--bix-accent, #fab387); }
-  .bar select { font-size: 16px; min-height: var(--tap); padding: 0 10px; border-radius: 8px;
-    background: var(--bix-surface, #313244); color: var(--bix-text, #cdd6f4);
-    border: 1px solid var(--bix-border-strong, #45475a); }
 
-  main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
-         padding: 14px 16px calc(env(safe-area-inset-bottom) + 40px); }
-  .list { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  /* The page preview takes whatever height the controls leave; it never
+     scrolls. The controls scroll inside their own panel if they must. */
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #stage { flex: 1; min-height: 0; padding: 10px 16px 6px; }
+  .wait { height: 100%; display: flex; align-items: center; justify-content: center;
+          text-align: center; color: var(--bix-text-soft, #a6adc8); font-size: .92rem;
+          border: 1px dashed var(--bix-border-strong, #45475a); border-radius: 12px; padding: 24px; }
+  aside { flex: none; max-height: 52dvh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+          padding: 6px 16px calc(env(safe-area-inset-bottom) + 10px);
+          display: flex; flex-direction: column; gap: 8px;
+          border-top: 1px solid var(--bix-border, #313244); }
 
-  .item { border: 1px solid var(--bix-border, #313244); border-radius: 12px;
-          background: var(--bix-bg-sunken, #181825); padding: 14px; }
-  .item.busy { opacity: .55; pointer-events: none; }
-  .when { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
-  .name { font-size: 1.15rem; font-weight: 400; margin: 0; }
-  .sub { color: var(--bix-text-soft, #a6adc8); font-size: .88rem; }
-  .file { font-family: var(--bix-mono, ui-monospace, Menlo, monospace); font-size: .72rem;
-          color: var(--bix-text-faint, #6c7086); word-break: break-all; margin-top: 4px; }
-
+  .who { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .name { font-size: 1.05rem; font-weight: 400; margin: 0; }
+  .sub { color: var(--bix-text-soft, #a6adc8); font-size: .82rem; overflow: hidden;
+         text-overflow: ellipsis; white-space: nowrap; }
   /* Reviewed or not: a filled dot vs a hollow ring, always with words. */
   .mark { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem;
           color: var(--bix-text-soft, #a6adc8); }
@@ -54,64 +51,99 @@
   .mark.done { color: var(--bix-text, #cdd6f4); }
   .mark.done::before { background: currentColor; }
 
-  .body { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
-  .acts { display: flex; gap: 8px; flex-wrap: wrap; }
-  .acts button { min-height: var(--tap); padding: 0 14px; border-radius: 8px; font: inherit;
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  button { min-height: var(--tap); padding: 0 14px; border-radius: 8px; font: inherit;
     font-size: 14px; cursor: pointer; background: none; color: var(--bix-text, #cdd6f4);
     border: 1px solid var(--bix-border-strong, #45475a); }
-  .acts button.veto { color: var(--bix-danger, #f38ba8); border-color: var(--bix-danger, #f38ba8); }
-  .acts button:disabled { opacity: .45; cursor: default; }
-  .missing, .pending { color: var(--bix-text-soft, #a6adc8); font-size: .9rem; margin-top: 8px; }
-  .empty { text-align: center; color: var(--bix-text-muted, #7f849c); padding: 48px 16px; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.veto { color: var(--bix-danger, #f38ba8); border-color: var(--bix-danger, #f38ba8); }
+  .seg { display: inline-flex; border: 1px solid var(--bix-border-strong, #45475a);
+         border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; color: var(--bix-text-soft, #a6adc8); }
+  .seg button + button { border-left: 1px solid var(--bix-border-strong, #45475a); }
+  .seg button[aria-pressed="true"] { background: var(--bix-surface, #313244);
+    color: var(--bix-text, #cdd6f4); font-weight: 500; }
+  .nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .nav .next { background: var(--bix-accent, #fab387); color: var(--bix-on-accent, #1e1e2e);
+               border-color: var(--bix-accent, #fab387); font-weight: 500; }
+  .name::first-letter { text-transform: uppercase; }
+  /* Placement controls, packed: the scale row, then Reset beside its status
+     and the layout it places for. The numbers show only on a wide screen. */
+  #adj .adj { flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 10px;
+              row-gap: 4px; }
+  #adj .adj-row:first-child { flex-basis: 100%; }
+  #adj .adj-pos { display: none; }
+  #adj[hidden] { display: none; }
+
   .toast { position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 16px);
     max-width: 640px; margin: 0 auto; background: var(--bix-surface, #313244);
     border: 1px solid var(--bix-border-strong, #45475a); border-radius: 10px; padding: 12px 14px;
-    font-size: .9rem; opacity: 0; pointer-events: none; transition: opacity .2s; }
+    font-size: .9rem; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 2; }
   .toast.on { opacity: 1; }
   .toast.bad { border-color: var(--bix-danger, #f38ba8); }
 
   @media (min-width: 900px) {
     header { padding-left: 32px; padding-right: 32px; }
-    main { padding-left: 32px; padding-right: 32px; }
-    .body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; }
+    main { flex-direction: row; }
+    #stage { padding: 20px 24px 20px 32px; }
+    aside { width: 360px; max-height: none; border-top: 0;
+            border-left: 1px solid var(--bix-border, #313244); padding: 20px 24px; gap: 12px; }
+    .nav { margin-top: auto; }
+    #adj .adj-pos { display: block; flex-basis: 100%; }
   }
 </style>
 </head>
 <body>
 <header>
   <div class="bix-site"><a href="./">inkplate</a><span class="sep">/</span>review</div>
-  <h1>Upcoming prints<i class="bix-dot">.</i></h1>
-  <p class="lede">The prints the panel will show, in the order they will hang. Move, scale,
-    rotate or veto each one, then mark it reviewed.</p>
-  <div class="bar">
+  <div class="head">
+    <h1>Upcoming prints<i class="bix-dot">.</i></h1>
     <span class="counts" id="counts">loading</span>
-    <select id="days" aria-label="How far ahead">
-      <option value="7">Next 7 days</option>
-      <option value="14" selected>Next 14 days</option>
-      <option value="28">Next 28 days</option>
-    </select>
-    <label><input type="checkbox" id="hide-done"> Hide reviewed</label>
   </div>
 </header>
-<main id="main">
-  <div class="list" id="list"><div class="empty">Looking ahead. The first load fetches each
-    upcoming print from Wikimedia Commons and can take a minute.</div></div>
+<main>
+  <div id="stage"><div class="wait">Looking ahead. The first load fetches each upcoming
+    print from Wikimedia Commons and can take a minute.</div></div>
+  <aside>
+    <div>
+      <div class="who"><span class="bix-label" id="when"></span><span id="mark"></span></div>
+      <div class="who"><h2 class="name" id="name"></h2><span class="sub" id="sub"></span></div>
+    </div>
+    <div class="row">
+      <span class="seg" role="group" aria-label="Preview on">
+        <button type="button" data-screen="dashboard" aria-pressed="false">Dashboard</button>
+        <button type="button" data-screen="daily" aria-pressed="false">Daily</button>
+      </span>
+      <button type="button" id="rotate" title="Turn the plate a quarter clockwise, for a scan bound in sideways">Rotate</button>
+      <button type="button" id="veto" class="veto">Veto</button>
+    </div>
+    <div id="adj"></div>
+    <div class="nav">
+      <button type="button" id="prev">Previous</button>
+      <button type="button" id="next" class="next">Next</button>
+    </div>
+  </aside>
 </main>
 <div class="toast" id="toast" role="status"></div>
 
 <script src="placement.js"></script>
 <script>
-// All URLs are relative: this page is also served under a path prefix.
+// A queue over the coming weeks' prints, one at a time, each shown on the
+// whole page it will hang on. Moving on saves the print's placement and
+// marks it reviewed. All URLs are relative: this page is also served under
+// a path prefix.
 const $ = id => document.getElementById(id);
 window.addEventListener('error', e => {
   toast('Page error: ' + String(e.message || e.error), true);
 });
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
-  ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 
 let items = [];
-let artLayout = null;            // {key, name}: the layout the panel draws now
-const mounted = new Map();   // file → Placement controller
+let idx = 0;
+let screen = 'dashboard';    // which print screen the preview shows
+let layouts = {};            // screen → {key, name}: the art layout it places prints in
+let ctl = null;              // the mounted Placement control, for idx's print
+let ctlFile = null;
+let busy = false;
 
 function toast(m, bad) {
   const t = $('toast'); t.textContent = m;
@@ -126,182 +158,194 @@ function fmtDay(iso) {
 function fmtDates(ds) {
   return ds.length === 1 ? fmtDay(ds[0]) : fmtDay(ds[0]) + ' to ' + fmtDay(ds[ds.length - 1]);
 }
-
-function drawCounts() {
-  const animals = items.filter(it => it.animal);
-  const done = animals.filter(it => it.animal.reviewed).length;
-  const fetching = items.filter(it => it.pending).length;
-  $('counts').innerHTML = `<b>${done}</b> of <b>${animals.length}</b> reviewed · ` +
-                          `<b>${animals.length - done}</b> left` +
-                          (fetching ? ` · <b>${fetching}</b> fetching` : '');
-}
-
 function subLine(a) {
   return [a.sci_name, a.year, a.artist, a.rotation ? 'turned ' + a.rotation + '°' : null]
     .filter(Boolean).join(' · ');
 }
-function markHtml(a) {
-  return `<span class="mark ${a.reviewed ? 'done' : ''}">${a.reviewed ? 'Reviewed' : 'To review'}</span>`;
+
+function drawCounts() {
+  const done = items.filter(it => it.animal && it.animal.reviewed).length;
+  $('counts').innerHTML = items.length
+    ? `<b>${idx + 1}</b> of <b>${items.length}</b> · <b>${done}</b> reviewed` : 'nothing upcoming';
 }
 
-// Each preview is a server render, so only draw the ones near the viewport.
-const io = new IntersectionObserver(es => {
-  for (const e of es) {
-    if (!e.isIntersecting) continue;
-    io.unobserve(e.target);
-    const it = items.find(i => i.animal && i.animal.file === e.target.dataset.file);
-    if (!it || mounted.has(it.animal.file)) continue;
-    mounted.set(it.animal.file, Placement.mount(e.target, {
-      file: it.animal.file, layout: artLayout.key, layoutName: artLayout.name,
-      placement: it.animal.placements[artLayout.key],
-      onSaved: a => { it.animal = a; },
-    }));
-  }
-}, {root: $('main'), rootMargin: '600px 0px'});
+function drawMark() {
+  const it = items[idx], a = it && it.animal;
+  $('mark').className = a ? 'mark' + (a.reviewed ? ' done' : '') : '';
+  $('mark').textContent = a ? (a.reviewed ? 'Reviewed' : 'To review') : '';
+}
 
-function itemHtml(it, i) {
-  const when = `<div class="when"><span class="bix-label">${esc(fmtDates(it.dates))}</span>` +
-    (it.on_panel ? '<span class="bix-label">on the panel now</span>' : '') +
-    (it.animal ? markHtml(it.animal) : '') + '</div>';
-  if (it.pending) {
-    return `<article class="item" data-i="${i}">${when}<div class="pending">Fetching… The first
-      look at a print comes from Wikimedia Commons and can take a minute.</div></article>`;
+function unmount() {
+  if (ctl) ctl.destroy();
+  ctl = null; ctlFile = null;
+}
+
+function wait(text) {
+  unmount();
+  $('stage').innerHTML = `<div class="wait"></div>`;
+  $('stage').firstChild.textContent = text;
+  $('adj').hidden = true;
+}
+
+// Draw the current item: its words, and its page preview and controls.
+function show() {
+  const it = items[idx];
+  drawCounts();
+  $('prev').disabled = busy || idx === 0;
+  $('next').disabled = busy || !items.length;
+  $('next').textContent = idx === items.length - 1 ? 'Done' : 'Next';
+  for (const b of document.querySelectorAll('.seg button')) {
+    b.setAttribute('aria-pressed', String(b.dataset.screen === screen));
   }
-  if (!it.animal) {
-    return `<article class="item" data-i="${i}">${when}<div class="missing">No usable print was found for
-      this day in any collection. The panel keeps the previous one; it is looked up again later.</div></article>`;
+  if (!it) {
+    $('when').textContent = ''; $('name').textContent = ''; $('sub').textContent = '';
+    drawMark();
+    $('rotate').disabled = $('veto').disabled = true;
+    wait('Nothing upcoming.');
+    return;
   }
   const a = it.animal;
-  return `<article class="item" data-i="${i}">${when}
-    <h2 class="name">${esc(a.common_name)}</h2>
-    <div class="sub">${esc(subLine(a))}</div>
-    <div class="file">${esc(a.file)}</div>
-    <div class="body">
-      <div class="adj-mount" data-file="${esc(a.file)}"></div>
-      <div class="acts">
-        <button type="button" data-act="reviewed">${a.reviewed ? 'Mark not reviewed' : 'Mark reviewed'}</button>
-        <button type="button" data-act="rotate" title="Turn the plate a quarter clockwise, for a scan bound in sideways">Rotate</button>
-        <button type="button" class="veto" data-act="veto">Veto image</button>
-      </div>
-    </div>
-  </article>`;
+  $('when').textContent = fmtDates(it.dates) + (it.on_panel ? ' · on the panel now' : '');
+  $('name').textContent = a ? a.common_name : (it.pending ? 'Fetching…' : 'No print');
+  $('sub').textContent = a ? subLine(a) : '';
+  $('sub').title = a ? a.file : '';
+  drawMark();
+  $('rotate').disabled = $('veto').disabled = busy || !a;
+  if (it.pending) {
+    wait('Fetching this print from Wikimedia Commons. The first look at a print can ' +
+         'take a minute; it appears here when it arrives.');
+    return;
+  }
+  if (!a) {
+    wait('No usable print was found for this day in any collection. The panel keeps the ' +
+         'previous one; it is looked up again later.');
+    return;
+  }
+  const lay = layouts[screen];
+  if (ctl && ctlFile === a.file + '|' + screen) return;   // already showing it
+  unmount();
+  $('adj').hidden = false;
+  ctlFile = a.file + '|' + screen;
+  ctl = Placement.mount({stage: $('stage'), controls: $('adj')}, {
+    file: a.file, layout: lay.key, layoutName: lay.name, screen, fit: true,
+    placement: a.placements[lay.key],
+    // The queue may have been refreshed by a poll since this was mounted.
+    onSaved: s => { for (const i of items) if (i.animal && i.animal.file === s.file) i.animal = s; },
+  });
 }
 
-const hidden = it => $('hide-done').checked && it.animal && it.animal.reviewed;
-
-function draw() {
-  for (const c of mounted.values()) c.destroy();
-  mounted.clear();
-  const shown = items.map((it, i) => [it, i]).filter(([it]) => !hidden(it));
-  $('list').innerHTML = shown.length ? shown.map(([it, i]) => itemHtml(it, i)).join('')
-    : `<div class="empty">${items.length ? 'Everything in this stretch is reviewed.'
-                                         : 'Nothing upcoming.'}</div>`;
-  $('list').querySelectorAll('.adj-mount').forEach(el => io.observe(el));
-  drawCounts();
+// Everything saved for the current print (false, with the reason shown,
+// when its placement did not save).
+async function settle() {
+  return ctl ? ctl.settle() : true;
 }
 
-// Slots not fetched yet come back pending and are fetched in the background;
-// re-poll until none are left, swapping in only the cards that resolved so
-// an open adjustment elsewhere on the page is left alone.
+async function withBusy(fn) {
+  if (busy) return;
+  busy = true; show();
+  try { await fn(); }
+  finally { busy = false; show(); }
+}
+
+// Move by `delta`: the current print's placement is saved, and it is
+// marked reviewed, before the next one is shown.
+function go(delta) {
+  return withBusy(async () => {
+    const it = items[idx];
+    if (!(await settle())) {
+      toast(`Not moved on: ${it.animal.common_name}'s placement did not save.`, true);
+      return;
+    }
+    if (it && it.animal && !it.animal.reviewed) {
+      try {
+        it.animal = (await Placement.postJSON('api/mark-reviewed', {file: it.animal.file})).animal;
+      } catch (e) {
+        toast(`Not moved on: could not mark ${it.animal.common_name} reviewed: ${e.message}`, true);
+        return;
+      }
+    }
+    const to = Math.max(0, Math.min(items.length - 1, idx + delta));
+    if (to === idx && delta > 0) {
+      const left = items.filter(i => i.animal && !i.animal.reviewed).length;
+      toast(left ? `End of the queue. ${left} earlier ${left === 1 ? 'print is' : 'prints are'} still to review.`
+                 : 'End of the queue: every print is reviewed.');
+    }
+    idx = to;
+  });
+}
+
+$('prev').addEventListener('click', () => go(-1));
+$('next').addEventListener('click', () => go(1));
+
+for (const b of document.querySelectorAll('.seg button')) {
+  b.addEventListener('click', () => withBusy(async () => {
+    if (b.dataset.screen === screen) return;
+    if (!(await settle())) { toast('The placement did not save; try again.', true); return; }
+    screen = b.dataset.screen;
+  }));
+}
+
+$('rotate').addEventListener('click', () => withBusy(async () => {
+  const it = items[idx];
+  try {
+    if (!(await settle())) return;
+    it.animal = (await Placement.postJSON('api/rotate', {file: it.animal.file, degrees: 90})).animal;
+    $('sub').textContent = subLine(it.animal);
+    if (ctl) await ctl.reload();
+  } catch (e) { toast('Rotate failed: ' + e.message, true); }
+}));
+
+$('veto').addEventListener('click', () => withBusy(async () => {
+  const a = items[idx].animal;
+  if (!confirm(`Veto ${a.common_name}'s image? It's removed from rotation for good, ` +
+               `and another plate takes its day.`)) return;
+  try {
+    await Placement.postJSON('api/veto', {what: 'animal', file: a.file});
+    toast('Vetoed. Finding a replacement plate…');
+    apply(await fetchReview(), false);
+  } catch (e) { toast('Veto failed: ' + e.message, true); }
+}));
+
+// Slots not fetched yet come back pending and are fetched in the
+// background; re-poll until none are left. The current print stays
+// mounted unless its slot changed.
 const POLL_MS = 4000;
 let pollTimer = null;
 
 async function fetchReview() {
-  const r = await fetch('api/review?days=' + encodeURIComponent($('days').value));
+  const r = await fetch('api/review');
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
   return j;
 }
 
-function schedulePoll() {
+function apply(j, first) {
+  const sameQueue = !first && j.items.length === items.length &&
+    j.items.every((n, i) => n.dates[0] === items[i].dates[0]);
+  items = j.items; layouts = j.layouts;
+  if (first) screen = j.screen;
+  if (first || !sameQueue) idx = j.start;
+  idx = Math.max(0, Math.min(items.length - 1, idx));
+  if (ctlFile && !(items[idx] && items[idx].animal &&
+                   ctlFile === items[idx].animal.file + '|' + screen)) unmount();
+  show();
   clearTimeout(pollTimer);
   if (items.some(it => it.pending)) pollTimer = setTimeout(poll, POLL_MS);
 }
 
 async function poll() {
-  let j;
-  try { j = await fetchReview(); }
-  catch (e) { toast('Could not check for fetched prints: ' + e.message, true); schedulePoll(); return; }
-  const fresh = j.items;
-  if (j.art_layout.key !== artLayout.key || fresh.length !== items.length ||
-      fresh.some((n, i) => n.dates[0] !== items[i].dates[0])) {
-    items = fresh; artLayout = j.art_layout; draw();
-  } else {
-    fresh.forEach((n, i) => {
-      if (!items[i].pending || n.pending) return;
-      items[i] = n;
-      const card = $('list').querySelector(`.item[data-i="${i}"]`);
-      if (!card) return;
-      if (hidden(n)) { card.remove(); return; }
-      card.outerHTML = itemHtml(n, i);
-      const mount = $('list').querySelector(`.item[data-i="${i}"] .adj-mount`);
-      if (mount) io.observe(mount);
-    });
-    drawCounts();
-  }
-  schedulePoll();
-}
-
-async function load() {
-  clearTimeout(pollTimer);
-  try {
-    const j = await fetchReview();
-    items = j.items; artLayout = j.art_layout;
-    draw();
-    schedulePoll();
-  } catch (e) {
-    $('list').innerHTML = `<div class="empty">Could not load the upcoming prints: ${esc(e.message)}</div>`;
-    $('counts').textContent = 'not loaded';
+  if (busy) { pollTimer = setTimeout(poll, POLL_MS); return; }
+  try { apply(await fetchReview(), false); }
+  catch (e) {
+    toast('Could not check for fetched prints: ' + e.message, true);
+    pollTimer = setTimeout(poll, POLL_MS);
   }
 }
 
-$('list').addEventListener('click', async e => {
-  const btn = e.target.closest('button[data-act]');
-  if (!btn) return;
-  const card = btn.closest('.item');
-  const it = items[+card.dataset.i];
-  const a = it.animal;
-  card.classList.add('busy');
-  try {
-    if (btn.dataset.act === 'reviewed') {
-      const j = await Placement.postJSON('api/mark-reviewed', {file: a.file, reviewed: !a.reviewed});
-      it.animal = j.animal;
-      if (hidden(it)) { draw(); return; }
-      // Redraw just this card's header and button; keep its preview.
-      card.querySelector('.mark').outerHTML = markHtml(it.animal);
-      btn.textContent = it.animal.reviewed ? 'Mark not reviewed' : 'Mark reviewed';
-      drawCounts();
-    } else if (btn.dataset.act === 'rotate') {
-      const j = await Placement.postJSON('api/rotate', {file: a.file, degrees: 90});
-      it.animal = j.animal;
-      card.querySelector('.sub').textContent = subLine(it.animal);
-      const c = mounted.get(a.file);
-      if (c) c.reload();
-    } else if (btn.dataset.act === 'veto') {
-      if (!confirm(`Veto ${a.common_name}'s image? It's removed from rotation for good, ` +
-                   `and another plate takes its day.`)) return;
-      await Placement.postJSON('api/veto', {what: 'animal', file: a.file});
-      toast('Vetoed. Finding a replacement plate…');
-      await load();
-    }
-  } catch (err) {
-    toast(btn.textContent.trim() + ' failed: ' + err.message, true);
-  } finally {
-    card.classList.remove('busy');
-  }
+fetchReview().then(j => apply(j, true), e => {
+  wait('Could not load the upcoming prints: ' + e.message);
+  $('counts').textContent = 'not loaded';
 });
-
-$('hide-done').addEventListener('change', draw);
-$('days').addEventListener('change', () => {
-  $('list').innerHTML = '<div class="empty">Looking ahead…</div>';
-  load();
-});
-try {   // remembered per browser; a convenience only
-  if (localStorage.getItem('inkplate-review-hide-done') === '1') $('hide-done').checked = true;
-  $('hide-done').addEventListener('change', () =>
-    localStorage.setItem('inkplate-review-hide-done', $('hide-done').checked ? '1' : '0'));
-} catch (err) { console.warn('localStorage unavailable; Hide reviewed is not remembered', err); }
-load();
 </script>
 </body>
 </html>

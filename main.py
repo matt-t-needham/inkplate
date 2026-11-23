@@ -306,20 +306,19 @@ async def api_placement(request: Request):
 
 @app.post("/api/mark-reviewed")
 async def api_mark_reviewed(request: Request):
-    """Mark an image reviewed (or not) on the review page: {file, reviewed}."""
+    """Mark an image reviewed: {file}. The review page sends it when it moves
+    on from a print."""
     body = await request.json()
     if not isinstance(body.get("file"), str):
         raise HTTPException(400, "file is required")
     a = await _target_animal(body)
-    mark = bool(body.get("reviewed", True))
     cfg = await asyncio.to_thread(state.mutate, lambda cfg: {"reviewed_images": (
-        cfg["reviewed_images"] + [a["file"]] if mark
-        else [f for f in cfg["reviewed_images"] if f != a["file"]])})
+        cfg["reviewed_images"] if a["file"] in cfg["reviewed_images"]
+        else cfg["reviewed_images"] + [a["file"]])})
     return {"animal": _animal_summary(a, cfg)}
 
 
-REVIEW_DAYS = 14
-REVIEW_MAX_DAYS = 60
+REVIEW_DAYS = 28   # how far ahead the review queue runs
 
 
 # The background fetch of upcoming animals the review page is waiting on.
@@ -328,7 +327,7 @@ _upcoming_fetch: asyncio.Task | None = None
 
 def _fetch_upcoming_in_background(args: tuple) -> None:
     """Resolve the review page's missing slots off the request (a cold
-    14-day fetch can outlast Cloudflare's 100 s timeout). One run at a
+    28-day fetch can outlast Cloudflare's 100 s timeout). One run at a
     time; the page re-polls, and a later poll starts another run for
     anything still missing."""
     global _upcoming_fetch
@@ -343,14 +342,23 @@ def _fetch_upcoming_in_background(args: tuple) -> None:
     _upcoming_fetch = asyncio.create_task(run())
 
 
+def _print_screen(cfg: dict) -> str:
+    """The print screen the panel shows, or the dashboard while it shows a
+    test pattern."""
+    return cfg["screen"] if cfg["screen"] in screens.PRINT_SCREENS else "dashboard"
+
+
 @app.get("/api/review")
-async def api_review(days: int = REVIEW_DAYS):
-    """The upcoming animals in the order they will hang, from today
-    (datasources.upcoming_animals), each with its settings. Answers at once
-    from the cache: a slot not fetched yet is "pending" and is fetched in
-    the background for the page's next poll."""
+async def api_review():
+    """The review queue: the next REVIEW_DAYS days' animals in the order
+    they will hang (datasources.upcoming_animals), each with its settings;
+    `start` is where the queue opens, the first print not reviewed yet.
+    `screen` is the print screen the panel shows and `layouts` the art
+    layout each print screen places a print in at the panel's orientation.
+    Answers at once from the cache: a slot not fetched yet is "pending" and
+    is fetched in the background for the page's next poll."""
     cfg = state.load_config()
-    args = (date.today(), min(max(days, 1), REVIEW_MAX_DAYS), cfg["animal_offset"],
+    args = (date.today(), REVIEW_DAYS, cfg["animal_offset"],
             cfg["animal_period_days"], cfg["vetoed_images"])
     try:
         items = await asyncio.to_thread(datasources.upcoming_animals, *args)
@@ -366,11 +374,45 @@ async def api_review(days: int = REVIEW_DAYS):
             "animal": _animal_summary(it["animal"], cfg) if it["animal"] else None}
            for it in items]
     animals = [o["animal"] for o in out if o["animal"]]
-    return {"items": out, "art_layout": _art_layout(cfg), "total": len(animals),
+    size = renderer.upright_size(cfg["rotation"])
+    layouts = {}
+    for s in screens.PRINT_SCREENS:
+        key = screens.panel_layout({**cfg, "screen": s}, size)
+        layouts[s] = {"key": key, "name": screens.ART_LAYOUT_NAMES.get(key, key)}
+    start = next((i for i, o in enumerate(out)
+                  if o["pending"] or (o["animal"] and not o["animal"]["reviewed"])), 0)
+    return {"items": out, "start": start, "screen": _print_screen(cfg),
+            "layouts": layouts, "total": len(animals),
             "reviewed": sum(1 for a in animals if a["reviewed"])}
 
 
-PREVIEW_MAX = 900   # px, the long side of an animal preview
+PREVIEW_MAX = 900        # px, the long side of an animal preview
+PAGE_PREVIEW_MAX = 1200  # px, the long side of a whole-page preview
+
+
+async def _previewed_animal(file: str, cfg: dict, layout: str, x, y, scale) -> dict:
+    """The animal a preview draws, with its saved settings, and with x/y/
+    scale (an unsaved draft from the Adjust control) for `layout` when any
+    is given. 404 unless the file is on the panel or in the review queue."""
+    a = await asyncio.to_thread(datasources.find_animal, file)
+    if not a:
+        raise HTTPException(404, "no such image on the panel or in the review list")
+    animal = screens.with_image_settings(a, cfg)
+    if x is not None or y is not None or scale is not None:
+        saved = animal["placements"].get(layout) or screens.DEFAULT_PLACEMENT
+        draft = {"x": saved["x"] if x is None else x, "y": saved["y"] if y is None else y,
+                 "scale": saved["scale"] if scale is None else scale}
+        try:
+            animal["placements"][layout] = screens.normalize_placement(draft)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return animal
+
+
+def _png(img) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
 
 
 @app.get("/api/animal-preview.png")
@@ -387,27 +429,14 @@ async def api_animal_preview(file: str, layout: str | None = None,
         raise HTTPException(400, "mode must be raw|panel")
     cfg = state.load_config()
     layout = _layout_param(layout, cfg)
-    a = await asyncio.to_thread(datasources.find_animal, file)
-    if not a:
-        raise HTTPException(404, "no such image on the panel or in the review list")
-    animal = screens.with_image_settings(a, cfg)
-    if x is not None or y is not None or scale is not None:
-        saved = animal["placements"].get(layout) or screens.DEFAULT_PLACEMENT
-        draft = {"x": saved["x"] if x is None else x, "y": saved["y"] if y is None else y,
-                 "scale": saved["scale"] if scale is None else scale}
-        try:
-            animal["placements"][layout] = screens.normalize_placement(draft)
-        except ValueError as e:
-            raise HTTPException(400, str(e))
+    animal = await _previewed_animal(file, cfg, layout, x, y, scale)
 
     def draw():
         img, placed = screens.art_preview(animal, cfg, layout, _layout_size(layout, cfg))
         if mode == "panel":
             img = palette.simulate_panel(palette.dither_to_spectra(img))
         img.thumbnail((PREVIEW_MAX, PREVIEW_MAX))
-        buf = io.BytesIO()
-        img.save(buf, "PNG")
-        return buf.getvalue(), placed
+        return _png(img), placed
     try:
         png, placed = await asyncio.to_thread(draw)
     except Exception as e:
@@ -415,6 +444,45 @@ async def api_animal_preview(file: str, layout: str | None = None,
         raise HTTPException(500, f"preview failed: {e}")
     return Response(png, media_type="image/png",
                     headers={"Cache-Control": "no-store",
+                             "X-Placement": json.dumps(placed)})
+
+
+@app.get("/api/page-preview.png")
+async def api_page_preview(file: str, screen: str | None = None,
+                           x: float | None = None, y: float | None = None,
+                           scale: float | None = None):
+    """The whole page `screen` (dashboard or daily; default: the panel's)
+    will hang with this print in place of today's, at the panel's current
+    orientation, drawn by the screen's own code (screens.page_preview) and
+    shown as the panel will (dithered to the six inks). x/y/scale are an
+    unsaved draft of the print's placement in that screen's art layout.
+    Headers: X-Placement (as drawn, clamped), X-Layout (the art layout),
+    X-Art-Box (the art box as [x0, y0, x1, y1] shares of the page, which
+    the review page maps a drag on the print through)."""
+    cfg = state.load_config()
+    screen = screen or _print_screen(cfg)
+    if screen not in screens.PRINT_SCREENS:
+        raise HTTPException(400, f"screen must be one of {', '.join(screens.PRINT_SCREENS)}")
+    size = renderer.upright_size(cfg["rotation"])
+    layout = screens.panel_layout({**cfg, "screen": screen}, size)
+    animal = await _previewed_animal(file, cfg, layout, x, y, scale)
+
+    def draw():
+        img, box, placed = screens.page_preview(screen, animal, cfg, size)
+        img = palette.simulate_panel(palette.dither_to_spectra(img))
+        img.thumbnail((PAGE_PREVIEW_MAX, PAGE_PREVIEW_MAX))
+        w, h = size
+        share = [round(box[0] / w, 4), round(box[1] / h, 4),
+                 round(box[2] / w, 4), round(box[3] / h, 4)]
+        return _png(img), share, placed
+    try:
+        png, share, placed = await asyncio.to_thread(draw)
+    except Exception as e:
+        log.error("page preview failed for %s on %s: %s", file, screen, e, exc_info=True)
+        raise HTTPException(500, f"preview failed: {e}")
+    return Response(png, media_type="image/png",
+                    headers={"Cache-Control": "no-store", "X-Layout": layout,
+                             "X-Art-Box": json.dumps(share),
                              "X-Placement": json.dumps(placed)})
 
 

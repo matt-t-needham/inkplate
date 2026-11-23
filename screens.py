@@ -479,11 +479,12 @@ def _animal(cfg: dict) -> dict | None:
         cfg)
 
 
-def _dashboard_data(cfg: dict) -> dict:
-    """Every source the dashboard draws from, each independently optional."""
+def _dashboard_data(cfg: dict, animal: dict | None) -> dict:
+    """Every source the dashboard draws from, each independently optional;
+    the print is the caller's (today's, or one the review page previews)."""
     return {
         "weather": datasources.get_weather(cfg["latitude"], cfg["longitude"]),
-        "animal": _animal(cfg),
+        "animal": animal,
         "snow": (datasources.get_snow(cfg["snow_latitude"], cfg["snow_longitude"])
                  if cfg["show_snow"] else None),
     }
@@ -500,11 +501,43 @@ def dashboard(width: int, height: int) -> Image.Image:
     # state at module top would be circular. At call time it's fully loaded.
     import state
     cfg = state.load_config()
-    data = _dashboard_data(cfg)
+    return _dashboard(width, height, cfg, _dashboard_data(cfg, _animal(cfg)))[0]
+
+
+def _dashboard(width: int, height: int, cfg: dict, data: dict):
+    """The dashboard drawn from `data`: (image, the Art drawn or None)."""
     if height > width:
         return _dashboard_portrait(width, height, cfg, data,
                                    layout=cfg.get("portrait_layout"))
     return _dashboard_landscape(width, height, cfg, data)
+
+
+# The screens that hang a print, and so can preview one on the review page.
+PRINT_SCREENS = ("dashboard", "daily")
+
+
+def page_preview(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int]):
+    """The whole page `screen` (PRINT_SCREENS) would show at `size` with
+    `animal` (with its image settings, as with_image_settings gives) as its
+    print instead of today's, drawn by that screen's own code: the
+    dashboard with today's weather and snow, the daily view with its
+    example planner data (labelled on the page). Returns (image, the art
+    box the print's placement is relative to, the placement as drawn after
+    clamping; None for the automatic fit)."""
+    width, height = size
+    if screen == "daily":
+        import planner_stub
+        today = date.today()
+        img, art = _daily(width, height, animal, planner_stub.get_planner(today), today)
+        box, _ = art_box(width, height, DAILY_LAYOUT, False)
+    elif screen == "dashboard":
+        data = _dashboard_data(cfg, animal)
+        img, art = _dashboard(width, height, cfg, data)
+        box, _ = art_box(width, height, panel_layout({**cfg, "screen": screen}, size),
+                         bool(data["snow"]))
+    else:
+        raise ValueError(f"no print on screen {screen!r}")
+    return img, box, art.placement if art else None
 
 
 def _scalers(width: int, height: int, base: tuple[int, int]):
@@ -556,7 +589,7 @@ def art_preview(animal: dict, cfg: dict, layout: str, size: tuple[int, int]):
     return img.crop(box), art.placement if art else None
 
 
-def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict) -> Image.Image:
+def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict):
     img = Image.new("RGB", (width, height), WHITE)
     X, Y = _scalers(width, height, LANDSCAPE)
     halo = dict(stroke_width=max(2, Y(4)), stroke_fill=WHITE)   # text over art
@@ -570,7 +603,7 @@ def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict) -> Imag
     _draw_caption(d, data["animal"] if drew_art else None, width - X(48), Y(36),
                   X, Y, halo)
     _draw_weather(d, data["weather"], X(52), Y(44), X, Y, halo)
-    return img
+    return img, drew_art
 
 
 def _draw_snow_over_art(img: Image.Image, art: "Art | None", x: int, data: dict,
@@ -590,7 +623,7 @@ def _draw_snow_over_art(img: Image.Image, art: "Art | None", x: int, data: dict,
 
 
 def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
-                        layout: str | None = None) -> Image.Image:
+                        layout: str | None = None):
     layout = layout if layout in PORTRAIT_LAYOUTS else DEFAULT_PORTRAIT_LAYOUT
     img = Image.new("RGB", (width, height), WHITE)
     X, Y = _scalers(width, height, PORTRAIT)
@@ -625,7 +658,7 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
         if data["snow"]:
             _snow_foot(d, cx, bottom, data["snow"], X, Y, halo,
                        name=cfg["snow_location_name"])
-        return img
+        return img, art
 
     # stack: the landscape arrangement folded — info on top, art below.
     box, mode = art_box(width, height, layout, bool(data["snow"]))
@@ -635,7 +668,7 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
     _draw_caption(d, data["animal"] if drew_art else None, right,
                   Y(PORTRAIT_CAPTION_TOP), X, Y, halo)
     _draw_weather(d, data["weather"], LX, Y(44), X, Y, halo)
-    return img
+    return img, drew_art
 
 
 # ── dashboard widgets ─────────────────────────────────────────────────────────
@@ -1447,11 +1480,11 @@ def daily(width: int, height: int) -> Image.Image:
     import planner_stub
     cfg = state.load_config()
     today = date.today()
-    return _daily(width, height, _animal(cfg), planner_stub.get_planner(today), today)
+    return _daily(width, height, _animal(cfg), planner_stub.get_planner(today), today)[0]
 
 
-def _daily(width: int, height: int, animal: dict | None, planner: dict,
-           today: date) -> Image.Image:
+def _daily(width: int, height: int, animal: dict | None, planner: dict, today: date):
+    """The daily view drawn from its data: (image, the Art drawn or None)."""
     img = Image.new("RGB", (width, height), WHITE)
     portrait = height > width
     X, Y = _scalers(width, height, PORTRAIT if portrait else LANDSCAPE)
@@ -1484,7 +1517,7 @@ def _daily(width: int, height: int, animal: dict | None, planner: dict,
         _draw_calendar(d, events, today, x, top, list_bottom, list_x - X(24), X, Y,
                        avoid=caption)
         _draw_todos(d, todos, list_x, top, X(440), list_bottom, X, Y)
-    return img
+    return img, art
 
 
 def placeholder(width: int, height: int) -> Image.Image:

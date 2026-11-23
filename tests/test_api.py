@@ -315,24 +315,55 @@ def test_daily_screen_adjusts_its_own_layout_in_the_panels_orientation(client, f
         assert abs(w / h - (box[2] - box[0]) / (box[3] - box[1])) < 0.01
 
 
-def test_review_marks_the_panel_image_and_round_trips_reviewed(client, fake_data, monkeypatch):
+def test_review_queue_opens_at_the_first_unreviewed_and_moving_on_keeps_placement(
+        client, fake_data, monkeypatch):
+    """The queue opens at the first print not reviewed yet (a reviewed one
+    and a day with no print are passed over; one still fetching is not).
+    Moving on from a print marks it reviewed and leaves its placement as
+    saved, so the queue then opens after it."""
     import datasources
     _showing(fake_data)
     hare = {**fake_data["animal"], "file": "File:Hare.tif", "common_name": "hare"}
-
-    def upcoming(*a, **k):
-        return [{"slot": 1, "dates": ["2026-11-21"], "animal": fake_data["animal"],
-                 "pending": False},
-                {"slot": 2, "dates": ["2026-11-22"], "animal": hare, "pending": False}]
-    monkeypatch.setattr(datasources, "upcoming_animals", upcoming)
+    items = [{"slot": 1, "dates": ["2026-11-21"], "animal": fake_data["animal"], "pending": False},
+             {"slot": 2, "dates": ["2026-11-22"], "animal": None, "pending": False},
+             {"slot": 3, "dates": ["2026-11-23"], "animal": hare, "pending": False},
+             {"slot": 4, "dates": ["2026-11-24"], "animal": None, "pending": True}]
+    monkeypatch.setattr(datasources, "upcoming_animals", lambda *a, **k: items)
     monkeypatch.setattr(datasources, "find_animal",
-                        lambda f: {"File:Hare.tif": hare}.get(f))
-    assert client.post("/api/mark-reviewed", json={"file": "File:Hare.tif"}).status_code == 200
+                        lambda f: {"File:Hare.tif": hare, "File:Fox.tif": fake_data["animal"]}.get(f))
+    monkeypatch.setattr(main, "_fetch_upcoming_in_background", lambda args: None)
+    assert client.post("/api/mark-reviewed", json={"file": "File:Fox.tif"}).status_code == 200
     j = client.get("/api/review").json()
-    assert [it["on_panel"] for it in j["items"]] == [True, False]
-    assert j["items"][1]["animal"]["reviewed"] is True
-    client.post("/api/mark-reviewed", json={"file": "File:Hare.tif", "reviewed": False})
-    assert client.get("/api/review").json()["reviewed"] == 0
+    assert [it["on_panel"] for it in j["items"]] == [True, False, False, False]
+    assert j["start"] == 2
+    client.post("/api/placement", json={"file": "File:Hare.tif", "layout": "hero", "x": 0.2})
+    client.post("/api/mark-reviewed", json={"file": "File:Hare.tif"})
+    client.post("/api/mark-reviewed", json={"file": "File:Hare.tif"})   # twice: still one mark
+    j = client.get("/api/review").json()
+    assert j["start"] == 3 and j["reviewed"] == 2
+    assert j["items"][2]["animal"]["placements"] == {"hero": {"x": 0.2, "y": 0.0, "scale": 1.0}}
+    assert state.load_config()["reviewed_images"] == ["File:Fox.tif", "File:Hare.tif"]
+
+
+def test_page_preview_is_the_whole_page_and_refuses_prints_outside_the_queue(client, fake_data):
+    """The review page's preview is the full page of the screen asked for,
+    at the panel's orientation, with the art box the page maps a drag
+    through; a file that is neither on the panel nor queued is refused."""
+    import json
+    _showing(fake_data)
+    client.post("/api/config", json={"rotation": 90, "portrait_layout": "stack"})
+    for screen, layout in (("dashboard", "stack"), ("daily", "daily")):
+        r = client.get("/api/page-preview.png", params={"file": "File:Fox.tif", "screen": screen})
+        assert r.status_code == 200
+        w, h = Image.open(io.BytesIO(r.content)).size
+        assert abs(w / h - 1200 / 1600) < 0.01
+        assert r.headers["X-Layout"] == layout
+        box, _ = screens.art_box(1200, 1600, layout, True)
+        assert json.loads(r.headers["X-Art-Box"]) == pytest.approx(
+            [box[0] / 1200, box[1] / 1600, box[2] / 1200, box[3] / 1600], abs=1e-3)
+    assert client.get("/api/page-preview.png", params={"file": "File:Nope.tif"}).status_code == 404
+    assert client.get("/api/page-preview.png", params={"file": "File:Fox.tif",
+                                                       "screen": "palette_test"}).status_code == 400
 
 
 def test_review_page_served_with_relative_urls(client):

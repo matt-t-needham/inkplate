@@ -97,11 +97,13 @@ docker logs apps-inkplate-1 -f
   panel is using* (landscape, portrait hero or portrait stack each keep
   their own). Changes save themselves when a drag or the slider is
   released.
-- **Review upcoming prints** (`/review`) — the next 14 days' prints in the
-  order they will hang, each with its preview and the same move/scale,
-  rotate and veto actions, plus a *reviewed* mark so they can be worked
-  through. A print reviewed or adjusted here is the one that hangs on its
-  day.
+- **Review upcoming prints** (`/review`) — a queue of the next 28 days'
+  prints in the order they will hang, one at a time, opening at the first
+  not yet reviewed. Each is shown on the whole page it will hang on
+  (dashboard or daily, switchable, at the panel's orientation, as the panel
+  will show it), and is moved by dragging on the print, scaled, rotated or
+  vetoed there. *Previous* / *Next* save it and mark it reviewed. A print
+  reviewed or adjusted here is the one that hangs on its day.
 - **Screen switcher** (top of the pane) — *Dashboard* or *Daily* (this
   week's calendar and the todo list beside the daily print; example data
   until the calendar feed and planner exist — DECISIONS §26).

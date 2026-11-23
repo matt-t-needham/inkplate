@@ -23,7 +23,7 @@ def test_only_todays_block_is_highlighted():
                "todos": {}}
     spans = []
     for today in (monday, monday + timedelta(days=6)):
-        rows = _bar_rows(screens._daily(1200, 1600, None, planner, today))
+        rows = _bar_rows(screens._daily(1200, 1600, None, planner, today)[0])
         assert rows and rows[-1] - rows[0] + 1 == len(rows)   # one unbroken block
         assert len(rows) < 1600 // 7                         # ...and only one day's
         spans.append(rows)
@@ -59,7 +59,7 @@ def test_daily_renders_without_a_print(data_dir, fake_data):
                            "title": "Short"}], "todos": {}}
     missing = {**fake_data["animal"], "path": str(data_dir / "gone.jpg")}
     for animal in (None, missing):
-        img = screens._daily(1200, 1600, animal, planner, date(2026, 11, 16))
+        img, _ = screens._daily(1200, 1600, animal, planner, date(2026, 11, 16))
         # the art's half is paper
         assert img.crop((600, 0, 1200, 1600)).getextrema() == ((255, 255),) * 3
 
@@ -82,7 +82,7 @@ def test_sparse_days_keep_their_date_column_clear_of_the_next_day():
     weekday: the next day's date starts below the weekday label."""
     planner = {"events": [{"date": "2026-11-16", "time": "09:00", "owner": "m",
                            "title": "x"}], "todos": {}}
-    img = screens._daily(1200, 1600, None, planner, date(2026, 11, 18))
+    img, _ = screens._daily(1200, 1600, None, planner, date(2026, 11, 18))
     x = screens.DAILY_MARGIN + 4
     # Date number and weekday label per day: if a date runs into the previous
     # day's weekday label, two runs merge and the count drops.
@@ -96,8 +96,8 @@ def test_daily_print_is_full_bleed_and_fades_only_on_its_inner_edge():
     from PIL import Image
     with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
         Image.new("RGB", (900, 1200), (20, 20, 20)).save(f.name)
-        img = screens._daily(1200, 1600, {"path": f.name, "common_name": "x"},
-                             {"events": [], "todos": {}}, date(2026, 11, 16))
+        img, _ = screens._daily(1200, 1600, {"path": f.name, "common_name": "x"},
+                                {"events": [], "todos": {}}, date(2026, 11, 16))
     for xy in ((1199, 800), (1000, 1599), (1199, 1599), (1199, 1000), (1000, 1580)):
         assert img.getpixel(xy)[0] < 40, xy                  # opaque at the border
     assert img.getpixel((600, 800)) == (255, 255, 255)       # transparent at the inner edge
