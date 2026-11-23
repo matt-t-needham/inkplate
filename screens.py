@@ -343,33 +343,6 @@ def _deg(d: ImageDraw.ImageDraw, x: int, y: int, text: str, size: int, fill,
     return int(w)
 
 
-def _edge_fade_mask(w: int, h: int, left: float = .2, right: float = .2,
-                    top: float = .2, bottom: float = .2) -> Image.Image:
-    """Alpha mask: opaque interior, constant (linear) fade to 0 across the
-    given fraction of each edge. A fraction of 0 leaves that edge hard, so the
-    artwork can run flush to the panel border. Built from two 1px gradient
-    strips resized up, so it stays cheap at panel size."""
-    from PIL import ImageChops
-
-    def ramp(n: int, near: float, far: float) -> list[int]:
-        a, b = max(1, int(n * near)), max(1, int(n * far))
-        out = []
-        for i in range(n):
-            v = 255
-            if near > 0 and i < a:
-                v = min(v, int(255 * i / a))
-            if far > 0 and i > n - 1 - b:
-                v = min(v, int(255 * (n - 1 - i) / b))
-            out.append(v)
-        return out
-
-    hx = Image.new("L", (w, 1))
-    hx.putdata(ramp(w, left, right))
-    vy = Image.new("L", (1, h))
-    vy.putdata(ramp(h, top, bottom))
-    return ImageChops.darker(hx.resize((w, h)), vy.resize((w, h)))
-
-
 def _sun_horizon(d: ImageDraw.ImageDraw, x: int, y: int, size: int, rising: bool) -> int:
     """Sunrise/sunset glyph centred on (x, y). Needs to be reasonably large:
     the two differ only by the chevron under the sun, which vanishes below
@@ -413,14 +386,15 @@ WEATHER_BLOCK_H = 440      # top of the glyph row to the bottom of the °F line
 PORTRAIT_CAPTION_TOP = 196
 # Hero: a centred composition. The weather band (_draw_weather_centred,
 # HERO_WEATHER_H tall) sits on the snow row (_snow_foot, HERO_SNOW_H tall)
-# or, with snow off, on the bottom margin; everything above, inside
-# HERO_MARGIN, is the art section. Centred art has no edge to bleed off, so
-# it gets only a soft HERO_FADE on every side — enough to hide the crop
-# line, not a dissolve. The subject crop is tight (a beak or a tail tip can
-# sit on it), so wherever the box has room the plate is drawn HERO_CONTEXT
-# further out and the fade lands on that paper margin; only where the box
-# itself stops it — the frame margin, the weather band — does the fade
-# fall on the drawing.
+# or, with snow off, on the bottom margin; everything above it, out to the
+# top, left and right borders, is the art section. Art that reaches a
+# border is opaque up to it (full bleed); every other edge gets a soft
+# HERO_FADE — enough to hide the crop line, not a dissolve. The subject
+# crop is tight (a beak or a tail tip can sit on it), so wherever the box
+# has room the plate is drawn HERO_CONTEXT further out and the fade lands
+# on that paper margin; only where the box itself stops it — the weather
+# band — does the fade fall on the drawing. The caption keeps HERO_MARGIN
+# from the top border.
 HERO_MARGIN = 40
 HERO_FADE = 36
 HERO_CONTEXT = 80
@@ -559,8 +533,8 @@ def art_box(width: int, height: int, layout: str, snow: bool):
         X, Y = _scalers(width, height, PORTRAIT)
         if layout == "hero":
             _, band_top = _hero_rows(height, Y, snow)
-            m = X(HERO_MARGIN)
-            return (m, Y(HERO_MARGIN), width - m, band_top - Y(24)), "centered"
+            # Full bleed: the box runs to the top, left and right borders.
+            return (0, 0, width, band_top - Y(24)), "centered"
         return (0, Y(500), width, height), "bleed"
     X, Y = _scalers(width, height, LANDSCAPE)
     # The caption clears the top; the weather only occupies the upper left,
@@ -591,16 +565,28 @@ def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict) -> Imag
     drew_art = _draw_art(img, data["animal"], box, X, Y, mode=mode,
                          layout=LANDSCAPE_LAYOUT)
 
+    _draw_snow_over_art(img, drew_art, X(52), data, cfg, X, Y, halo)
     d = ImageDraw.Draw(img)
     _draw_caption(d, data["animal"] if drew_art else None, width - X(48), Y(36),
                   X, Y, halo)
     _draw_weather(d, data["weather"], X(52), Y(44), X, Y, halo)
-
-    bottom = height - Y(52)
-    if data["snow"]:
-        _snow_report(d, X(52), bottom, data["snow"], X, Y, halo,
-                     name=cfg["snow_location_name"])
     return img
+
+
+def _draw_snow_over_art(img: Image.Image, art: "Art | None", x: int, data: dict,
+                        cfg: dict, X, Y, halo) -> None:
+    """The snow report along the bottom-left border. The art is opaque up
+    to the border (full bleed), so where the report lands on it the art is
+    lightened under it first, as the hero does for its caption."""
+    if not data["snow"]:
+        return
+    bottom = img.height - Y(52)
+    rect = _snow_report(ImageDraw.Draw(Image.new("RGB", (1, 1))), x, bottom,
+                        data["snow"], X, Y, halo, name=cfg["snow_location_name"])
+    if art and _overlaps(rect, art.rect):
+        _fade_behind(img, rect, X, Y)
+    _snow_report(ImageDraw.Draw(img), x, bottom, data["snow"], X, Y, halo,
+                 name=cfg["snow_location_name"])
 
 
 def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
@@ -644,15 +630,11 @@ def _dashboard_portrait(width: int, height: int, cfg: dict, data: dict,
     # stack: the landscape arrangement folded — info on top, art below.
     box, mode = art_box(width, height, layout, bool(data["snow"]))
     drew_art = _draw_art(img, data["animal"], box, X, Y, mode=mode, layout=layout)
+    _draw_snow_over_art(img, drew_art, LX, data, cfg, X, Y, halo)
     d = ImageDraw.Draw(img)
     _draw_caption(d, data["animal"] if drew_art else None, right,
                   Y(PORTRAIT_CAPTION_TOP), X, Y, halo)
     _draw_weather(d, data["weather"], LX, Y(44), X, Y, halo)
-
-    bottom = height - Y(52)
-    if data["snow"]:
-        _snow_report(d, LX, bottom, data["snow"], X, Y, halo,
-                     name=cfg["snow_location_name"])
     return img
 
 
@@ -708,12 +690,15 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     the result inside the box; no entry draws it exactly as the automatic
     fit does.
 
+    In every mode the art is opaque up to any frame border it reaches and
+    fades only on its other edges (_art_mask).
     mode "bleed" (landscape, stack): anchored to the box's right edge with
     the last ART_BLEED running off the frame, long fades on the left and
-    the top/bottom edges so text can sit over it.
+    the top/bottom edges where they stop short of the border, so text can
+    sit over it.
     mode "daily": full bleed — every plate covers the box (a figure too,
-    cropped around its ink centroid), opaque to the frame's edges, faded in
-    only from the box's own inner left edge (_art_mask).
+    cropped around its ink centroid), faded in only from the box's own
+    inner left edge.
     mode "centered" (hero): the plate's ink centroid is put on the box's
     centre (clamped so nothing leaves the box) and drawn with up to
     HERO_CONTEXT of paper around it, so the soft HERO_FADE falls on that
@@ -783,34 +768,71 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
         origin = (x - ox, y - oy)
         art, x, y = _with_context(sheet, sb, scale, origin, box, X, Y)
     else:
-        x = bx1 - (art.width if mode == "daily" else round(art.width * (1 - ART_BLEED)))
+        # A covering plate fills its box exactly, so it meets every border
+        # the box does; a contained figure bleeds ART_BLEED off the right.
+        x = bx1 - (art.width if cover else round(art.width * (1 - ART_BLEED)))
         y = by0 + (bh - art.height) // 2
         origin = (x - ox, y - oy)
     drawn = None
     if placement:
         art, x, y, drawn = _place(sheet, sb, scale, origin, box, placement, mode, X, Y)
-    img.paste(art, (x, y), _art_mask(art, x, box, mode, X, Y))
+    img.paste(art, (x, y), _art_mask(art, x, y, box, img.size, mode, X, Y))
     return Art((x, y, x + art.width, y + art.height), drawn)
 
 
-def _art_mask(art: Image.Image, x: int, box, mode: str, X, Y) -> Image.Image:
-    """The edge fades for art pasted at x in its box. Widths are fixed on the
-    panel, not a share of the image — otherwise a small plate fades over a
-    few pixels and a large one over hundreds, which is what made the
-    peacock dissolve early. Bleed art runs off the frame on the right, so
-    that edge is left hard unless a placement has pulled it inside.
-    Daily: see `_daily_mask`."""
+def _art_mask(art: Image.Image, x: int, y: int, box, frame, mode: str, X, Y) -> Image.Image:
+    """The edge fades for art pasted at (x, y) in its box on a frame of size
+    `frame`. One rule for every layout: a side of the art that lies on the
+    frame's border is opaque right up to it (full bleed); every other side
+    fades in over a fixed panel width, not a share of the image (otherwise a
+    small plate fades over a few pixels and a large one over hundreds, which
+    is what made the peacock dissolve early).
+    Dashboard art fades from its own edges: the hero's soft HERO_FADE hides
+    a crop line, the bleed layouts' long left fade lets the weather sit
+    over it. Daily art fades in only from its box's inner left edge, where
+    it meets the calendar, wherever the art itself starts (DECISIONS §26)."""
+    W, H = frame
+    w, h = art.size
     if mode == "daily":
-        return _daily_mask(art, x, box)
-    if mode == "centered":
-        fx, fy = min(0.45, X(HERO_FADE) / art.width), min(0.45, Y(HERO_FADE) / art.height)
-        return _edge_fade_mask(art.width, art.height, left=fx, right=fx, top=fy, bottom=fy)
-    edge = min(0.45, Y(ART_FADE_EDGE) / art.height)
-    right = 0.0 if x + art.width >= box[2] else min(0.45, X(ART_FADE_EDGE) / art.width)
-    return _edge_fade_mask(
-        art.width, art.height,
-        left=min(0.45, X(ART_FADE_LEFT) / art.width), right=right,
-        top=edge, bottom=edge)
+        fades = {"left": max(1.0, (box[2] - box[0]) * DAILY_FADE)}
+        lo, hi = (box[0], box[1]), (box[2], box[3])
+    else:
+        if mode == "centered":
+            fx, fy = X(HERO_FADE), Y(HERO_FADE)
+            fades = {"left": fx, "right": fx, "top": fy, "bottom": fy}
+        else:
+            fades = {"left": X(ART_FADE_LEFT), "right": X(ART_FADE_EDGE),
+                     "top": Y(ART_FADE_EDGE), "bottom": Y(ART_FADE_EDGE)}
+        fades = {k: min(v, 0.45 * (w if k in ("left", "right") else h))
+                 for k, v in fades.items()}
+        lo, hi = (x, y), (x + w, y + h)
+    # A side on the frame's border never fades.
+    if x <= 0:
+        fades.pop("left", None)
+    if y <= 0:
+        fades.pop("top", None)
+    if x + w >= W:
+        fades.pop("right", None)
+    if y + h >= H:
+        fades.pop("bottom", None)
+
+    def ramp(n: int, start: int, near: str, far: str, lo_ref: float, hi_ref: float):
+        out = []
+        for i in range(n):
+            p, v = start + i, 1.0
+            if near in fades:
+                v = min(v, (p - lo_ref) / fades[near])
+            if far in fades:
+                v = min(v, (hi_ref - 1 - p) / fades[far])
+            out.append(int(255 * max(0.0, min(1.0, v))))
+        return out
+
+    from PIL import ImageChops
+    hx = Image.new("L", (w, 1))
+    hx.putdata(ramp(w, x, "left", "right", lo[0], hi[0]))
+    vy = Image.new("L", (1, h))
+    vy.putdata(ramp(h, y, "top", "bottom", lo[1], hi[1]))
+    return ImageChops.darker(hx.resize((w, h)), vy.resize((w, h)))
 
 
 def _place(sheet: Image.Image, sb, scale: float, origin, box, placement: dict,
@@ -1222,17 +1244,6 @@ def _daily_art_box(width: int, height: int):
         return (width // 2, 0, width, height)
     X, _ = _scalers(width, height, LANDSCAPE)
     return (X(DAILY_LANDSCAPE_ART_X), 0, width, height)
-
-
-def _daily_mask(art: Image.Image, x: int, box) -> Image.Image:
-    """Full bleed: opaque right up to the frame's edges, faded only on the
-    box's inner left edge where it meets the calendar — transparent there,
-    opaque DAILY_FADE of the box across it, wherever the art itself starts."""
-    fade = max(1.0, (box[2] - box[0]) * DAILY_FADE)
-    hx = Image.new("L", (art.width, 1))
-    hx.putdata([max(0, min(255, int(255 * (x + i - box[0]) / fade)))
-                for i in range(art.width)])
-    return hx.resize(art.size)
 
 
 def _week(today: date) -> list[date]:

@@ -28,8 +28,8 @@ the panel):
   Buffon (Paris, 1749), Brehm (Leipzig, 1863), and — birds — Catesby (1731),
   Audubon (1827), Gould (1840). 227 animals with native ranges — land, air
   and a deep ocean section — every one verified to resolve; deterministic
-  daily pick; auto-cropped, paper cleaned, drawn as a soft edge-faded
-  background. Caption: *"Rhinoceros · Rhinoceros indicus · of South Asia · as
+  daily pick; auto-cropped, paper cleaned, drawn full bleed (opaque to
+  the panel's edges, faded only where it meets the weather). Caption: *"Rhinoceros · Rhinoceros indicus · of South Asia · as
   depicted by Conrad Gessner, Zürich, 1551"*. Falls back to yesterday's beast
   if Commons is down.
 

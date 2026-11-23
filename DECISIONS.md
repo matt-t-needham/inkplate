@@ -189,6 +189,27 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 27. Full bleed on the dashboard (2026-11-22)
+"Remove the fade of the image on the borders of the displays — it can be
+full opacity up to the edge of the display, full bleed!" Every art layout
+now follows the daily screen's rule (§26), in one mask (`_art_mask`): a side
+of the print that lies on the panel's border is opaque right up to it; every
+other side still fades, over the same fixed panel widths as before, because
+there the print meets other content (the hero's weather band, the stack's
+weather above it, the landscape weather and caption). To let prints reach
+the border, the hero's art box now runs to the top, left and right borders
+(it kept a 40 px `HERO_MARGIN` before; the caption still keeps it), and a
+covering plate (a scene) in the landscape and stack layouts fills its box
+exactly instead of being pushed `ART_BLEED` right, which left a faded strip
+on the stack's left border. A contained figure still bleeds `ART_BLEED` off
+the right as before. With the art opaque at the bottom border, the landscape
+and stack snow report gets the hero's lightened patch under it
+(`_fade_behind`) wherever it lands on the art.
+
+Saved placements stay valid (they are relative to the art box), but a
+hero placement made before this sits slightly differently, because its box
+grew by the old margin on three sides.
+
 ## 26. The daily screen, on example data (2026-11-21)
 A second real screen, `daily`, switched from the top of the pane
 (Dashboard / Daily; the old Screen dropdown now only picks test patterns).
