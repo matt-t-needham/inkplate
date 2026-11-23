@@ -200,15 +200,17 @@ function ago(ts) {
 }
 
 // The preview: the panel simulation, with the print dragged on it while
-// the panel shows a print screen (placement.js). Remounted when the print,
-// the screen, the art layout or the hanging changes.
+// the panel shows a print screen that has an art layout (placement.js; the
+// portrait daily view shows its print whole, so it has none). Remounted
+// when the print, the screen, the art layout or the hanging changes.
 let pane = null, paneKey = null;
 function mountPreview(st) {
   const a = st.current && st.current.animal;
   const screen = st.config.screen;
-  const draggable = !!(a && a.file && MAIN_SCREENS.includes(screen));
+  const lay = st.art_layout;   // null: the print can't be placed
+  const draggable = !!(a && a.file && lay && MAIN_SCREENS.includes(screen));
   const rot = st.config.rotation, portrait = rot === 90 || rot === 270;
-  const key = [draggable ? a.file : '', screen, st.art_layout.key, rot].join('|');
+  const key = [draggable ? a.file : '', screen, lay ? lay.key : '', rot].join('|');
   if (pane && key === paneKey) return;
   if (pane) pane.destroy();
   paneKey = key;
@@ -216,7 +218,7 @@ function mountPreview(st) {
   pane = Placement.mount({stage: $('preview'), controls: $('preview-ctl')}, {
     restUrl: () => 'api/preview.png?mode=panel&t=' + Date.now(),
     file: draggable ? a.file : null, screen: draggable ? screen : null,
-    layoutName: st.art_layout.name, aspect: portrait ? 3 / 4 : 4 / 3,
+    layoutName: lay ? lay.name : null, aspect: portrait ? 3 / 4 : 4 / 3,
     alt: 'The panel as it shows now',
     onSaved: () => loadState(),
   });
@@ -344,11 +346,11 @@ function renderNow(st) {
   const cur = st.current;
   if (!cur) return;
   const a = cur.animal;
-  const layout = st.art_layout.key;
+  const layout = st.art_layout ? st.art_layout.key : null;
   $('now-animal').textContent = a ? a.common_name : 'none cached yet';
   $('now-animal-sub').textContent = a ? [a.sci_name, a.year, a.artist,
     a.rotation ? 'turned ' + a.rotation + '°' : null,
-    a.placements[layout] ? 'adjusted' : null,
+    layout && a.placements[layout] ? 'adjusted' : null,
   ].filter(Boolean).join(' · ') : '';
   $('btn-veto-animal').disabled = !(a && a.file);
   $('btn-rotate-animal').disabled = !(a && a.file);

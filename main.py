@@ -105,18 +105,27 @@ async def api_state():
     }
 
 
-def _art_layout(cfg: dict) -> dict:
+def _layout_summary(key: str | None) -> dict | None:
+    """{key, name} for an art layout; None when the page has none (the
+    portrait daily view shows its print whole, so it can't be dragged)."""
+    return {"key": key, "name": screens.ART_LAYOUT_NAMES.get(key, key)} if key else None
+
+
+def _art_layout(cfg: dict) -> dict | None:
     """The art layout the panel draws now: the one dragging the print on the
-    pane places it in."""
-    key = screens.panel_layout(cfg, renderer.upright_size(cfg["rotation"]))
-    return {"key": key, "name": screens.ART_LAYOUT_NAMES.get(key, key)}
+    pane places it in, or None when the panel's print can't be placed."""
+    return _layout_summary(screens.panel_layout(cfg, renderer.upright_size(cfg["rotation"])))
 
 
 def _layout_param(v, cfg: dict) -> str:
     """A request's art layout: one of screens.ART_LAYOUTS, else 400; None
-    means the panel's current one."""
+    means the panel's current one (400 when it has none)."""
     if v is None:
-        return _art_layout(cfg)["key"]
+        cur = _art_layout(cfg)
+        if cur is None:
+            raise HTTPException(400, "the panel's page shows the print whole; "
+                                     "it has no placement")
+        return cur["key"]
     if v not in screens.ART_LAYOUTS:
         raise HTTPException(400, f"layout must be one of {', '.join(screens.ART_LAYOUTS)}")
     return v
@@ -369,10 +378,8 @@ async def api_review():
            for it in items]
     animals = [o["animal"] for o in out if o["animal"]]
     size = renderer.upright_size(cfg["rotation"])
-    layouts = {}
-    for s in screens.PRINT_SCREENS:
-        key = screens.panel_layout({**cfg, "screen": s}, size)
-        layouts[s] = {"key": key, "name": screens.ART_LAYOUT_NAMES.get(key, key)}
+    layouts = {s: _layout_summary(screens.panel_layout({**cfg, "screen": s}, size))
+               for s in screens.PRINT_SCREENS}
     start = next((i for i, o in enumerate(out)
                   if o["pending"] or (o["animal"] and not o["animal"]["reviewed"])), 0)
     return {"items": out, "start": start, "screen": _print_screen(cfg),
@@ -404,9 +411,10 @@ def _webp_uri(img, lossless: bool) -> str:
     return "data:image/webp;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def _preview_screen(screen: str | None, cfg: dict) -> tuple[str, tuple[int, int], str]:
+def _preview_screen(screen: str | None, cfg: dict) -> tuple[str, tuple[int, int], str | None]:
     """A preview's screen (default: the panel's print screen; 400 unless it
-    hangs a print), the panel's upright size and the art layout it uses."""
+    hangs a print), the panel's upright size and the art layout it uses
+    (None: its print can't be placed)."""
     screen = screen or _print_screen(cfg)
     if screen not in screens.PRINT_SCREENS:
         raise HTTPException(400, f"screen must be one of {', '.join(screens.PRINT_SCREENS)}")
@@ -422,7 +430,8 @@ async def api_page_preview(file: str, screen: str | None = None):
     code (screens.page_preview) and shown as the panel will (dithered to the
     six inks). Headers: X-Placement (as drawn, clamped), X-Layout (the art
     layout), X-Art-Box (the art box as [x0, y0, x1, y1] shares of the
-    page)."""
+    page); X-Layout and X-Art-Box are left out for a page whose print
+    can't be placed (the portrait daily view)."""
     cfg = state.load_config()
     screen, size, layout = _preview_screen(screen, cfg)
     animal = await _previewed_animal(file, cfg)
@@ -432,18 +441,18 @@ async def api_page_preview(file: str, screen: str | None = None):
         img = palette.simulate_panel(palette.dither_to_spectra(img))
         img.thumbnail((PAGE_PREVIEW_MAX, PAGE_PREVIEW_MAX))
         w, h = size
-        share = [round(box[0] / w, 4), round(box[1] / h, 4),
-                 round(box[2] / w, 4), round(box[3] / h, 4)]
+        share = box and [round(box[0] / w, 4), round(box[1] / h, 4),
+                         round(box[2] / w, 4), round(box[3] / h, 4)]
         return _png(img), share, placed
     try:
         png, share, placed = await asyncio.to_thread(draw)
     except Exception as e:
         log.error("page preview failed for %s on %s: %s", file, screen, e, exc_info=True)
         raise HTTPException(500, f"preview failed: {e}")
-    return Response(png, media_type="image/png",
-                    headers={"Cache-Control": "no-store", "X-Layout": layout,
-                             "X-Art-Box": json.dumps(share),
-                             "X-Placement": json.dumps(placed)})
+    headers = {"Cache-Control": "no-store", "X-Placement": json.dumps(placed)}
+    if layout:
+        headers |= {"X-Layout": layout, "X-Art-Box": json.dumps(share)}
+    return Response(png, media_type="image/png", headers=headers)
 
 
 @app.get("/api/page-layers")
@@ -455,9 +464,12 @@ async def api_page_layers(file: str, screen: str | None = None):
     and "art" (the plate, unclipped, with its "rect" and "centre") as
     data: URIs in the panel simulation's tones, "paper" (the colour under
     them), "box", "fades", "auto" and "placement" in frame px of "size",
-    the panel's upright frame, and "limits" (the placement clamp)."""
+    the panel's upright frame, and "limits" (the placement clamp). 400
+    for a page whose print can't be placed (the portrait daily view)."""
     cfg = state.load_config()
     screen, size, layout = _preview_screen(screen, cfg)
+    if layout is None:
+        raise HTTPException(400, f"the {screen} page shows the print whole; it can't be placed")
     animal = await _previewed_animal(file, cfg)
 
     def draw():

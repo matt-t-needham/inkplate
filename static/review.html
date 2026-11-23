@@ -134,7 +134,7 @@ window.addEventListener('error', e => {
 let items = [];
 let idx = 0;
 let screen = 'dashboard';    // which print screen the preview shows
-let layouts = {};            // screen → {key, name}: the art layout it places prints in
+let layouts = {};            // screen → {key, name}: the art layout it places prints in, or null (shown whole, no drag)
 let ctl = null;              // the mounted Placement control, for idx's print
 let ctlFile = null;
 let busy = false;
@@ -224,7 +224,9 @@ function show() {
   ctl = Placement.mount({stage: $('stage'), controls: $('adj')}, {
     restUrl: () => 'api/page-preview.png?' +
       new URLSearchParams({file: a.file, screen: shown, t: Date.now()}),
-    file: a.file, screen, layoutName: lay.name, fit: true, plainWheel: true, outline: true,
+    // No layout: the page shows the print whole (the portrait daily view),
+    // so it is previewed without dragging.
+    file: lay ? a.file : null, screen, layoutName: lay ? lay.name : null, fit: true, plainWheel: true, outline: true,
     alt: 'The whole page with this print, as the panel will show it',
     // The queue may have been refreshed by a poll since this was mounted.
     onSaved: s => { for (const i of items) if (i.animal && i.animal.file === s.file) i.animal = s; },

@@ -375,7 +375,9 @@ DEFAULT_PORTRAIT_LAYOUT = "hero"
 # string named by the caller of art_box/_draw_art; a new screen with its own
 # art box adds its key here.
 LANDSCAPE_LAYOUT = "landscape"
-DAILY_LAYOUT = "daily"     # the daily screen's art, in either orientation
+# The daily screen's art, in landscape only: in portrait the print hangs
+# whole as a polaroid, with no art box to place it in (DECISIONS §30).
+DAILY_LAYOUT = "daily"
 ART_LAYOUTS = (LANDSCAPE_LAYOUT, *PORTRAIT_LAYOUTS, DAILY_LAYOUT)
 ART_LAYOUT_NAMES = {"landscape": "landscape layout", "hero": "portrait hero layout",
                     "stack": "portrait stack layout", "daily": "daily view"}
@@ -423,13 +425,14 @@ def with_image_settings(animal: dict | None, cfg: dict) -> dict | None:
             "placements": dict((cfg.get("image_placements") or {}).get(f) or {})}
 
 
-def panel_layout(cfg: dict, size: tuple[int, int]) -> str:
+def panel_layout(cfg: dict, size: tuple[int, int]) -> str | None:
     """The art layout the panel draws at this frame size: the daily screen's
     own, else the dashboard's — landscape, or the configured portrait
-    layout."""
-    if cfg.get("screen") == "daily":
-        return DAILY_LAYOUT
+    layout. None for the portrait daily screen, whose print is shown whole
+    and can't be placed."""
     width, height = size
+    if cfg.get("screen") == "daily":
+        return DAILY_LAYOUT if width >= height else None
     if height > width:
         lay = cfg.get("portrait_layout")
         return lay if lay in PORTRAIT_LAYOUTS else DEFAULT_PORTRAIT_LAYOUT
@@ -525,12 +528,15 @@ def _page(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int]):
     dashboard with today's weather and snow, the daily view with its
     example planner data (labelled on the page). Returns (image, the Art
     drawn or None, the art box the print's placement is relative to, the
-    box's _draw_art mode)."""
+    box's _draw_art mode); box and mode are None for a page whose print
+    can't be placed (panel_layout gives no layout)."""
     width, height = size
     if screen == "daily":
         import planner_stub
         today = date.today()
         img, art = _daily(width, height, animal, planner_stub.get_planner(today), today)
+        if panel_layout({"screen": screen}, size) is None:
+            return img, art, None, None
         box, mode = art_box(width, height, DAILY_LAYOUT, False)
     elif screen == "dashboard":
         data = _dashboard_data(cfg, animal)
@@ -543,8 +549,8 @@ def _page(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int]):
 
 
 def page_preview(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int]):
-    """_page as (image, art box, the placement as drawn after clamping; None
-    for the automatic fit)."""
+    """_page as (image, art box or None, the placement as drawn after
+    clamping; None for the automatic fit or a print that can't be placed)."""
     img, art, box, _ = _page(screen, animal, cfg, size)
     return img, box, art.placement if art else None
 
@@ -564,7 +570,10 @@ def page_layers(screen: str, animal: dict | None, cfg: dict, size: tuple[int, in
     render before dithering, give or take the fades the box's inner sides
     ("fades": side → frame px) add where the art is cut there.
     Also "box", "auto" (the automatic fit's subject centre, which a
-    placement shifts from, frame px) and "placement" as drawn."""
+    placement shifts from, frame px) and "placement" as drawn.
+    ValueError for a page whose print can't be placed."""
+    if screen == "daily" and panel_layout({"screen": screen}, size) is None:
+        raise ValueError("the portrait daily view shows the print whole; it can't be placed")
     f = min(1.0, long_side / max(size))
     token = _ART_FILL.set(WHITE)
     try:
@@ -665,7 +674,7 @@ def art_box(width: int, height: int, layout: str, snow: bool):
     if layout not in ART_LAYOUTS:
         raise ValueError(f"unknown art layout: {layout!r}")
     if layout == DAILY_LAYOUT:
-        return _daily_art_box(width, height), "daily"
+        return _daily_art_box(width, height), "daily"   # landscape only
     if layout != LANDSCAPE_LAYOUT:
         X, Y = _scalers(width, height, PORTRAIT)
         if layout == "hero":
@@ -1412,10 +1421,33 @@ DAILY_EVENT_ROW_H = 36
 DAILY_TODO_ROW_H = 58
 
 
+# Portrait (DECISIONS §30): the calendar fills the left half, the todo list
+# sits at the bottom right, and the print hangs between it and the caption
+# as a polaroid on twine, shown whole. Layout px of the 1200x1600 frame.
+DAILY_CAL_RIGHT = 572
+DAILY_TODO_X = 632
+DAILY_TODO_RIGHT = 1168
+POLAROID_CX = 900          # the card's centre
+POLAROID_BOTTOM = 1000     # the card's lowest point (and above the list)
+POLAROID_CLEAR = 30        # below the caption, above the todo list
+POLAROID_PHOTO_MAX_W = 500
+POLAROID_SIDE, POLAROID_TOP, POLAROID_FOOT = 20, 34, 80   # the card's borders
+POLAROID_TILT = -1.5       # degrees, clockwise positive (the mockup's sense)
+POLAROID_INK = (46, 42, 39)          # #2e2a27: card outline, hole rims
+POLAROID_HOLE = (232, 228, 223)      # #e8e4df
+POLAROID_HOLE_R = 4.5
+POLAROID_HOLE_IN = 11                # hole centres, inside the top and bottom edges
+POLAROID_SHADOW = ((4, 6), 9, 0.20)  # offset, blur, opacity
+TWINE_OUTLINE, TWINE_CORE, TWINE_PLY = (90, 58, 29), (201, 159, 100), (134, 89, 45)
+TWINE_TOP_X = 650          # where the twine comes in over the top border
+TWINE_SS = 2               # supersampling for the card and the twine
+
+
 def _daily_art_box(width: int, height: int):
-    """Portrait: the right half, full height. Landscape: the right third."""
+    """The landscape daily view's art box: the right third, full height.
+    The portrait view has none: its print hangs whole as a polaroid."""
     if height > width:
-        return (width // 2, 0, width, height)
+        raise ValueError("the portrait daily view has no art box")
     X, _ = _scalers(width, height, LANDSCAPE)
     return (X(DAILY_LANDSCAPE_ART_X), 0, width, height)
 
@@ -1489,75 +1521,144 @@ def _day_lines(events: list[dict], cap: int) -> list[dict | str]:
     return evs[:cap - 1] + [f"+{len(evs) - cap + 1} more"]
 
 
+class _CalStyle(NamedTuple):
+    """The calendar's sizes, in layout px (scaled by X/Y when drawn)."""
+    num: int           # date number (bold)
+    weekday: int       # weekday label, letter-spaced by weekday_track
+    weekday_track: int
+    weekday_gap: int   # the weekday label's top, below the date number's top
+    text: int          # time and title
+    allday: int        # ALL DAY small caps, letter-spaced by allday_track
+    allday_track: int
+    tag_font: int
+    tag_w: int
+    tag_h: int
+    row: int           # one event line
+    time_x: int        # the time column, right of the calendar's left edge
+    title_lines: int   # a title wraps to at most this many lines ...
+    wrap_h: int        # ... each further line this much lower
+    spread: bool       # spare height goes into equal gaps between days
+
+
+# Landscape: compact, beside the list, titles cut to one line.
+CAL_COMPACT = _CalStyle(num=42, weekday=17, weekday_track=2, weekday_gap=40, text=26,
+                        allday=19, allday_track=1, tag_font=20, tag_w=48, tag_h=32,
+                        row=DAILY_EVENT_ROW_H, time_x=84, title_lines=1, wrap_h=0,
+                        spread=False)
+# Portrait: the whole left half, so larger type, titles wrapped to two lines
+# and the days spread down the full height (DECISIONS §30).
+CAL_TALL = _CalStyle(num=56, weekday=18, weekday_track=2, weekday_gap=56, text=28,
+                     allday=19, allday_track=2, tag_font=20, tag_w=50, tag_h=34,
+                     row=50, time_x=92, title_lines=2, wrap_h=34, spread=True)
+
+
 def _draw_calendar(d: ImageDraw.ImageDraw, events: list[dict], today: date, x: int,
-                   top: int, bottom: int, title_right: int, X, Y, avoid=None) -> int:
+                   top: int, bottom: int, title_right: int, X, Y, avoid=None,
+                   style: _CalStyle = CAL_COMPACT) -> int:
     """The week, one block per day: date and weekday in a left column, the
     date's top level with the cap height of the day's first line, then a
     line per event — time (its own column; ALL DAY in small caps; blank
     when untimed), owner tag, title. Days before today are drawn faded;
-    today and later at full strength. Titles may run on past the column
-    (over the art) up to `title_right`, or stop short of the `avoid`
-    rectangle on the lines beside it. A block is never shorter than its
-    date column. Days are squeezed to fewer lines each until the week fits
-    above `bottom`. Returns its bottom."""
-    f_num = _font(Y(42), bold=True)
-    f_wd = _font(Y(17))
-    f_time = _font(Y(26))
-    f_allday = _font(Y(19))
-    f_tag = _font(Y(20))
-    f_title = _font(Y(26))
+    today and later at full strength. Titles stop at `title_right`, or
+    short of the `avoid` rectangle on the lines beside it; a style with
+    title_lines > 1 wraps them, the last line cut with an ellipsis. A block
+    is never shorter than its date column. When the week doesn't fit above
+    `bottom`, titles are first kept to one line, then days squeezed to
+    fewer lines each ("+N more"). A spreading style shares the spare
+    height out as equal gaps between days. Returns its bottom."""
+    f_num = _font(Y(style.num), bold=True)
+    f_wd = _font(Y(style.weekday))
+    f_time = _font(Y(style.text))
+    f_allday = _font(Y(style.allday))
+    f_tag = _font(Y(style.tag_font))
+    f_title = _font(Y(style.text))
     halo = dict(stroke_width=max(1, Y(3)), stroke_fill=WHITE)
     week = _week(today)
     by_day = {dy.isoformat(): [e for e in events if e.get("date") == dy.isoformat()]
               for dy in week}
-    pad, gap, row = Y(6), Y(10), Y(DAILY_EVENT_ROW_H)
+    pad, min_gap, row = Y(6), Y(10), Y(style.row)
     # Where a line's capitals start, below the top of its row: the date
     # number's top sits there too, whether or not the day has a line.
     cap_top = d.textbbox((0, row // 2), "H", font=f_title, anchor="lm")[1]
-    wd_y = Y(40)                     # the weekday label, below the date's top
+    wd_y = Y(style.weekday_gap)      # the weekday label, below the date's top
     date_col = cap_top + wd_y + d.textbbox((0, 0), "MTWFS", font=f_wd)[3]
 
-    def heights(cap):
-        return [2 * pad + max(date_col, row * len(_day_lines(by_day[dy.isoformat()], cap)))
-                for dy in week]
-    cap = DAILY_DAY_MAX_EVENTS
-    while cap > 1 and top + sum(heights(cap)) + gap * 6 > bottom:
-        cap -= 1
-
-    time_x = x + X(84)
+    time_x = x + X(style.time_x)
     time_w = max(d.textlength("00:00", font=f_time),
-                 _spaced(d, 0, 0, "ALL DAY", f_allday, X(1), None, measure=True))
+                 _spaced(d, 0, 0, "ALL DAY", f_allday, X(style.allday_track), None,
+                         measure=True))
     tag_x = time_x + int(time_w) + X(12)
-    tag_w, tag_h = X(48), Y(32)
+    tag_w, tag_h = X(style.tag_w), Y(style.tag_h)
     title_x = tag_x + tag_w + X(12)
+
+    def title_lines(ev, ly, n):
+        right = title_right
+        if avoid and ly < avoid[3] and ly + row > avoid[1]:
+            right = min(right, avoid[0] - X(16))
+        text = ev.get("title") or ""
+        lines = _wrap(d, text, f_title, right - title_x) if n > 1 else [text]
+        if len(lines) > n:
+            lines = lines[:n - 1] + [" ".join(lines[n - 1:])]
+        return [_fit(d, ln, f_title, right - title_x) for ln in lines]
+
+    if avoid and style.spread:
+        # avoid is checked against each line's place at the minimum gap.
+        raise ValueError("a spreading calendar style cannot avoid a rectangle")
+
+    def layout(cap, n):
+        """Per day: its lines, each (event or "+N more", title lines, y
+        within the day), and its height."""
+        days, day_top = [], top
+        for dy in week:
+            ly, lines = 0, []
+            for ev in _day_lines(by_day[dy.isoformat()], cap):
+                tl = [ev] if isinstance(ev, str) else title_lines(ev, day_top + pad + ly, n)
+                lines.append((ev, tl, ly))
+                ly += row + (len(tl) - 1) * Y(style.wrap_h)
+            h = 2 * pad + max(date_col, ly)
+            days.append((lines, h))
+            day_top += h + min_gap
+        return days
+
+    def fits(days):
+        return top + sum(h for _, h in days) + min_gap * 6 <= bottom
+    tries = [(DAILY_DAY_MAX_EVENTS, style.title_lines)]
+    if style.title_lines > 1:
+        tries.append((DAILY_DAY_MAX_EVENTS, 1))
+    tries += [(c, 1 if style.title_lines > 1 else style.title_lines)
+              for c in range(DAILY_DAY_MAX_EVENTS - 1, 0, -1)]
+    for cap, n in tries:
+        days = layout(cap, n)
+        if fits(days):
+            break
+    gap = min_gap
+    if style.spread:
+        gap = max(min_gap, (bottom - top - sum(h for _, h in days)) // 6)
+
     y = top
-    for dy, h in zip(week, heights(cap)):
+    for dy, (lines, h) in zip(week, days):
         past = dy < today
         ink = DAILY_FADED if past else BLACK
         num = str(dy.day)
         num_top = y + pad + cap_top
         d.text((x, num_top - d.textbbox((0, 0), num, font=f_num)[1]), num, font=f_num, fill=ink)
-        _spaced(d, x + X(1), num_top + wd_y, dy.strftime("%a").upper(), f_wd, X(2), ink)
-        ly = y + pad
-        for ev in _day_lines(by_day[dy.isoformat()], cap):
-            mid = ly + row // 2
+        _spaced(d, x + X(1), num_top + wd_y, dy.strftime("%a").upper(), f_wd,
+                X(style.weekday_track), ink)
+        for ev, tl, ly in lines:
+            mid = y + pad + ly + row // 2
             if isinstance(ev, str):        # "+N more"
                 d.text((title_x, mid), ev, font=f_title, fill=ink, anchor="lm")
-                ly += row
                 continue
             if ev.get("all_day"):
                 _spaced(d, time_x, mid - f_allday.size // 2 - Y(1), "ALL DAY",
-                        f_allday, X(1), ink)
+                        f_allday, X(style.allday_track), ink)
             elif ev.get("time"):
                 d.text((time_x, mid), ev["time"], font=f_time, fill=ink, anchor="lm")
             _owner_tag(d, tag_x, mid - tag_h // 2, tag_w, tag_h, ev.get("owner"), f_tag,
                        outline=max(1, X(3)), faded=past)
-            right = title_right
-            if avoid and ly < avoid[3] and ly + row > avoid[1]:
-                right = min(right, avoid[0] - X(16))
-            title = _fit(d, ev.get("title") or "", f_title, right - title_x)
-            d.text((title_x, mid), title, font=f_title, fill=ink, anchor="lm", **halo)
-            ly += row
+            for i, ln in enumerate(tl):
+                d.text((title_x, mid + i * Y(style.wrap_h)), ln, font=f_title, fill=ink,
+                       anchor="lm", **halo)
         y += h + gap
     return y - gap
 
@@ -1602,8 +1703,9 @@ def _draw_todos(d: ImageDraw.ImageDraw, todos: dict, x: int, top: int, width: in
 def _draw_daily_caption(img: Image.Image, animal: dict, art_rect, right: int, top: int,
                         X, Y) -> tuple[int, int, int, int]:
     """The animal's name in bold over the caption as one italic paragraph,
-    right-aligned at the top of the art, with the dashboard's lightened
-    patch under it. Returns the caption's rectangle."""
+    right-aligned at `top`, with the dashboard's lightened patch under it
+    where it lies over `art_rect` (None: nothing under it). Returns the
+    caption's rectangle."""
     d = ImageDraw.Draw(img)
     f_name = _font(Y(36), bold=True)
     f_cap = _font(Y(28), style="serif_italic")
@@ -1613,7 +1715,7 @@ def _draw_daily_caption(img: Image.Image, animal: dict, art_rect, right: int, to
     cap_top = top + Y(50)
     w = max([d.textlength(name, font=f_name)] + [d.textlength(ln, font=f_cap) for ln in lines])
     rect = (int(right - w), top, right, cap_top + Y(lh) * len(lines))
-    if _overlaps(rect, art_rect):
+    if art_rect and _overlaps(rect, art_rect):
         _fade_behind(img, rect, X, Y)
     d.text((right, top), name, font=f_name, fill=BLACK, anchor="ra")
     _draw_caption_lines(d, lines, f_cap, right, cap_top, Y, {}, line_h=lh)
@@ -1632,10 +1734,13 @@ def daily(width: int, height: int) -> Image.Image:
 
 
 def _daily(width: int, height: int, animal: dict | None, planner: dict, today: date):
-    """The daily view drawn from its data: (image, the Art drawn or None)."""
+    """The daily view drawn from its data: (image, the Art drawn or None).
+    In portrait the Art is the polaroid card's rectangle, with no
+    placement or geometry: the print is shown whole and can't be moved."""
+    if height > width:
+        return _daily_portrait(width, height, animal, planner, today)
     img = Image.new("RGB", (width, height), WHITE)
-    portrait = height > width
-    X, Y = _scalers(width, height, PORTRAIT if portrait else LANDSCAPE)
+    X, Y = _scalers(width, height, LANDSCAPE)
     box = _daily_art_box(width, height)
     # A missing image (fetch failed, unreadable file) leaves its box as paper.
     art = _draw_art(img, animal, box, X, Y, mode="daily", layout=DAILY_LAYOUT)
@@ -1644,28 +1749,236 @@ def _daily(width: int, height: int, animal: dict | None, planner: dict, today: d
         caption = _draw_daily_caption(img, animal, art.rect, width - X(DAILY_MARGIN),
                                       Y(DAILY_MARGIN), X, Y)
     d = ImageDraw.Draw(img)
-
-    f_foot = _font(Y(24))
-    foot_top = height - Y(8) - Y(28)
-    if planner.get("example"):
-        d.text((X(DAILY_MARGIN), foot_top), "Example data", font=f_foot, fill=BLACK)
-    x, top = X(DAILY_MARGIN) + X(4), Y(DAILY_MARGIN) + Y(2)
+    foot_top = _daily_footer(d, planner, height, X, Y)
+    top = Y(DAILY_MARGIN) + Y(2)
     list_bottom = foot_top - Y(12)
     events, todos = planner.get("events") or [], planner.get("todos") or {}
-    if portrait:
-        # The list is measured first; the calendar gets everything above it.
-        list_h = len(_todo_rows(todos)) * Y(DAILY_TODO_ROW_H)
-        cal_bottom = _draw_calendar(d, events, today, x, top,
-                                    list_bottom - list_h - Y(DAILY_LIST_GAP),
-                                    width - X(DAILY_MARGIN), X, Y, avoid=caption)
-        _draw_todos(d, todos, X(DAILY_MARGIN), cal_bottom + Y(DAILY_LIST_GAP),
-                    X(520), list_bottom, X, Y)
-    else:
-        list_x = X(DAILY_LIST_X)
-        _draw_calendar(d, events, today, x, top, list_bottom, list_x - X(24), X, Y,
-                       avoid=caption)
-        _draw_todos(d, todos, list_x, top, X(440), list_bottom, X, Y)
+    list_x = X(DAILY_LIST_X)
+    _draw_calendar(d, events, today, X(DAILY_MARGIN) + X(4), top, list_bottom,
+                   list_x - X(24), X, Y, avoid=caption)
+    _draw_todos(d, todos, list_x, top, X(440), list_bottom, X, Y)
     return img, art
+
+
+def _daily_footer(d: ImageDraw.ImageDraw, planner: dict, height: int, X, Y) -> int:
+    """"Example data" bottom-left while the planner is the stub. Returns
+    the footer's top."""
+    foot_top = height - Y(8) - Y(28)
+    if planner.get("example"):
+        d.text((X(DAILY_MARGIN), foot_top), "Example data", font=_font(Y(24)), fill=BLACK)
+    return foot_top
+
+
+def _daily_portrait(width: int, height: int, animal: dict | None, planner: dict,
+                    today: date):
+    """Portrait daily view: the week down the whole left half, the todo
+    list at the bottom right, the caption top right and the print between
+    them as a polaroid on twine (DECISIONS §30)."""
+    img = Image.new("RGB", (width, height), WHITE)
+    X, Y = _scalers(width, height, PORTRAIT)
+    d = ImageDraw.Draw(img)
+    foot_top = _daily_footer(d, planner, height, X, Y)
+    events, todos = planner.get("events") or [], planner.get("todos") or {}
+    _draw_calendar(d, events, today, X(DAILY_MARGIN) + X(4), Y(DAILY_MARGIN) + Y(2),
+                   foot_top - Y(16), X(DAILY_CAL_RIGHT), X, Y, style=CAL_TALL)
+    # The list hangs from the bottom margin, as tall as its rows.
+    list_bottom = height - Y(DAILY_MARGIN)
+    list_top = list_bottom - len(_todo_rows(todos)) * Y(DAILY_TODO_ROW_H)
+    _draw_todos(d, todos, X(DAILY_TODO_X), list_top, X(DAILY_TODO_RIGHT - DAILY_TODO_X),
+                list_bottom, X, Y)
+    photo = _polaroid_photo(animal)
+    if photo is None:
+        return img, None
+    caption = _draw_daily_caption(img, animal, None, width - X(DAILY_MARGIN),
+                                  Y(DAILY_MARGIN), X, Y)
+    card = _draw_polaroid(img, photo, caption, list_top, X, Y)
+    return img, Art(card, None, None)
+
+
+def _polaroid_photo(animal: dict | None) -> Image.Image | None:
+    """The print as the polaroid shows it: the plate turned by its
+    rotation, standardised (_prep_plate) and cut to its subject with up to
+    HERO_CONTEXT of sheet around it — whole, at its own shape. None (and a
+    warning) when the plate can't be read; None for no animal."""
+    if not animal:
+        return None
+    try:
+        plate = Image.open(animal["path"]).convert("RGB")
+    except (OSError, KeyError) as e:
+        log.warning("daily: no print drawn, plate for %s unreadable: %s",
+                    animal.get("file") or animal.get("common_name"), e)
+        return None
+    rot = int(animal.get("rotation") or 0) % 360
+    if rot:
+        plate = plate.rotate(-rot, expand=True)
+    sheet, sb, _ = _prep_plate(plate)
+    # HERO_CONTEXT is panel px around the subject. The photo is drawn about
+    # POLAROID_PHOTO_MAX_W wide, so that many panel px are this many sheet px.
+    sw, sh = sb[2] - sb[0], sb[3] - sb[1]
+    pad = HERO_CONTEXT * max(sw, sh) / POLAROID_PHOTO_MAX_W
+    return sheet.crop((max(0, round(sb[0] - pad)), max(0, round(sb[1] - pad)),
+                       min(sheet.width, round(sb[2] + pad)),
+                       min(sheet.height, round(sb[3] + pad))))
+
+
+def _polaroid_size(aspect: float, room_h: float, X, Y) -> tuple[int, int]:
+    """The photo's size (w, h) at `aspect` (w/h): as wide as
+    POLAROID_PHOTO_MAX_W allows, shrunk uniformly so the tilted card is at
+    most `room_h` tall."""
+    a = math.radians(abs(POLAROID_TILT))
+    sin, cos = math.sin(a), math.cos(a)
+    side, ends = 2 * X(POLAROID_SIDE), Y(POLAROID_TOP) + Y(POLAROID_FOOT)
+    # A tilted card's height: its width * sin + its height * cos.
+    ph = (room_h - side * sin - ends * cos) / (aspect * sin + cos)
+    pw = min(X(POLAROID_PHOTO_MAX_W), ph * aspect)
+    pw = max(1, int(pw))
+    return pw, max(1, int(pw / aspect))
+
+
+def _draw_polaroid(img: Image.Image, photo: Image.Image, caption, list_top: int, X, Y):
+    """The photo as a tilted polaroid with a soft shadow, hung on twine
+    through punched holes: in from over the top border left of the
+    `caption`, and out of the bottom hole fading into the todo list at
+    `list_top`. Centred at POLAROID_CX between the caption and
+    POLAROID_BOTTOM. Returns the card's rectangle (frame px)."""
+    from PIL import ImageFilter
+    top = caption[3] + Y(POLAROID_CLEAR)
+    bottom = min(Y(POLAROID_BOTTOM), list_top - Y(POLAROID_CLEAR))
+    pw, ph = _polaroid_size(photo.width / photo.height, bottom - top, X, Y)
+    ss = TWINE_SS
+    side, top_b, foot = X(POLAROID_SIDE), Y(POLAROID_TOP), Y(POLAROID_FOOT)
+    cw, ch = pw + 2 * side, top_b + ph + foot
+
+    # The card, upright and supersampled, then turned.
+    card = Image.new("RGBA", (cw * ss, ch * ss), (0, 0, 0, 0))
+    cd = ImageDraw.Draw(card)
+    cd.rounded_rectangle([0, 0, cw * ss - 1, ch * ss - 1], radius=3 * ss, fill=WHITE,
+                         outline=POLAROID_INK, width=2 * ss)
+    card.paste(photo.resize((pw * ss, ph * ss), Image.LANCZOS), (side * ss, top_b * ss))
+    edge = Image.new("RGBA", card.size, (0, 0, 0, 0))   # the photo's own faint edge
+    ImageDraw.Draw(edge).rectangle([side * ss, top_b * ss, (side + pw) * ss - 1,
+                                    (top_b + ph) * ss - 1], outline=(0, 0, 0, 77),
+                                   width=round(1.5 * ss))
+    card = Image.alpha_composite(card, edge)
+    cd = ImageDraw.Draw(card)
+    holes = [(cw / 2, Y(POLAROID_HOLE_IN)), (cw / 2, ch - Y(POLAROID_HOLE_IN))]
+    r = POLAROID_HOLE_R * ss
+    for hx, hy in holes:
+        cd.ellipse([hx * ss - r, hy * ss - r, hx * ss + r, hy * ss + r],
+                   fill=POLAROID_HOLE, outline=POLAROID_INK, width=round(1.6 * ss))
+    # PIL turns anticlockwise for a positive angle; the tilt is clockwise-positive.
+    card = card.rotate(-POLAROID_TILT, resample=Image.BICUBIC, expand=True)
+    card = card.resize((round(card.width / ss), round(card.height / ss)), Image.LANCZOS)
+    cx, cy = X(POLAROID_CX), (top + bottom) / 2
+    x0, y0 = round(cx - card.width / 2), round(cy - card.height / 2)
+
+    (sx, sy), blur, opacity = POLAROID_SHADOW
+    alpha = card.getchannel("A")
+    reach = blur * 3
+    shadow = Image.new("L", (card.width + 2 * reach, card.height + 2 * reach), 0)
+    shadow.paste(alpha.point(lambda v: int(v * opacity)), (reach, reach))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(blur / 2))
+    img.paste(BLACK, (x0 - reach + X(sx), y0 - reach + Y(sy)), shadow)
+    img.paste(card.convert("RGB"), (x0, y0), alpha)
+
+    # Where the holes ended up after the turn.
+    t = math.radians(POLAROID_TILT)
+
+    def turned(px, py):
+        lx, ly = px - cw / 2, py - ch / 2
+        return (cx + lx * math.cos(t) - ly * math.sin(t),
+                cy + lx * math.sin(t) + ly * math.cos(t))
+    hole_top, hole_bottom = turned(*holes[0]), turned(*holes[1])
+    rect = (x0, y0, x0 + card.width, y0 + card.height)
+    _draw_twine(img, hole_top, hole_bottom, rect[3], list_top, X, Y)
+    return rect
+
+
+def _quad(p0, c, p1, step: float) -> list[tuple[float, float]]:
+    """Points along a quadratic Bézier about `step` px apart."""
+    n = max(8, int(math.dist(p0, p1) / step))
+    return [((1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * c[0] + t * t * p1[0],
+             (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * c[1] + t * t * p1[1])
+            for t in (i / n for i in range(n + 1))]
+
+
+def _bowed(p0, p1, bow: float, step: float):
+    """A quadratic from p0 to p1 bowed sideways by `bow` px at its middle."""
+    length = math.dist(p0, p1) or 1
+    nx, ny = -(p1[1] - p0[1]) / length, (p1[0] - p0[0]) / length
+    c = ((p0[0] + p1[0]) / 2 + nx * bow, (p0[1] + p1[1]) / 2 + ny * bow)
+    return _quad(p0, c, p1, step)
+
+
+def _rope(d: ImageDraw.ImageDraw, pts, s: float) -> None:
+    """Twine along `pts` at scale `s`: a faint shadow, a dark outline, a
+    lighter core and short diagonal ply ticks every 6 px."""
+    def line(points, fill, w):
+        d.line(points, fill=fill, width=max(1, round(w * s)), joint="curve")
+    line([(x + 2 * s, y + 3 * s) for x, y in pts], (0, 0, 0, 36), 6)
+    line(pts, TWINE_OUTLINE + (255,), 6.5)
+    line(pts, TWINE_CORE + (255,), 4)
+    acc = 0.0
+    for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
+        seg = math.dist((xa, ya), (xb, yb))
+        acc += seg
+        if acc < 6 * s or not seg:
+            continue
+        acc = 0.0
+        tx, ty = (xb - xa) / seg, (yb - ya) / seg
+        nx, ny = -ty, tx
+        d.line([(xb - (nx * 1.8 + tx * 1.6) * s, yb - (ny * 1.8 + ty * 1.6) * s),
+                (xb + (nx * 1.8 + tx * 1.6) * s, yb + (ny * 1.8 + ty * 1.6) * s)],
+               fill=TWINE_PLY + (255,), width=max(1, round(1.4 * s)))
+
+
+def _knot(d: ImageDraw.ImageDraw, x: float, y: float, s: float) -> None:
+    """A small knot at a hole: two short loose ends and the knot itself."""
+    for a in (-0.6, 0.5):
+        end = (x + math.sin(a) * 12 * s,
+               y + (math.cos(a) * 10 - 14 * (1 if a < 0 else -0.2)) * s)
+        d.line([(x, y), end], fill=TWINE_OUTLINE + (255,), width=round(5 * s))
+        d.line([(x, y), end], fill=TWINE_CORE + (255,), width=round(2.6 * s))
+    d.ellipse([x - 6 * s, y - 5 * s, x + 6 * s, y + 5 * s], fill=TWINE_CORE + (255,),
+              outline=TWINE_OUTLINE + (255,), width=round(2 * s))
+    d.line([(x - 3 * s, y - 2 * s), (x + 2 * s, y + 3 * s)], fill=TWINE_PLY + (255,),
+           width=max(1, round(1.2 * s)))
+
+
+def _draw_twine(img: Image.Image, hole_top, hole_bottom, card_bottom: int,
+                list_top: int, X, Y) -> None:
+    """The twine on its own layer, composited over the card: in from above
+    the top border, curving into the top hole, and out of the bottom hole
+    down towards the todo list, fading out between the card and the list's
+    top."""
+    from PIL import ImageChops
+    ss = TWINE_SS
+    # The layer covers the right half: the twine never reaches further left.
+    lx0 = img.width // 2
+    layer = Image.new("RGBA", ((img.width - lx0) * ss, img.height * ss), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+
+    def at(p):
+        return ((p[0] - lx0) * ss, p[1] * ss)
+    # Down at TWINE_TOP_X, well left of the caption (at most X(400) wide,
+    # right-aligned), turning towards the hole only below it: the card's
+    # top is POLAROID_CLEAR under the caption.
+    top_run = _quad((X(TWINE_TOP_X), -Y(12)), (X(TWINE_TOP_X), hole_top[1]), hole_top, 3)
+    tail = _bowed(hole_bottom, (X(POLAROID_CX + 4), list_top + Y(30)), 16, 3)
+    for run in (top_run, tail):
+        _rope(d, [at(p) for p in run], ss)
+    _knot(d, *at((hole_top[0], hole_top[1] - 1)), ss)
+    _knot(d, *at((hole_bottom[0], hole_bottom[1] + 1)), ss)
+    layer = layer.resize((img.width - lx0, img.height), Image.LANCZOS)
+
+    # Fade the tail out between just below the card and the list's top.
+    f0, f1 = card_bottom + Y(10), list_top
+    ramp = Image.new("L", (1, img.height))
+    ramp.putdata([255 if y <= f0 else 0 if y >= f1 else round(255 * (f1 - y) / (f1 - f0))
+                  for y in range(img.height)])
+    layer.putalpha(ImageChops.multiply(layer.getchannel("A"), ramp.resize(layer.size)))
+    region = img.crop((lx0, 0, img.width, img.height)).convert("RGBA")
+    img.paste(Image.alpha_composite(region, layer).convert("RGB"), (lx0, 0))
 
 
 def placeholder(width: int, height: int) -> Image.Image:
