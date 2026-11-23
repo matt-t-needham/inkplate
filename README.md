@@ -104,8 +104,7 @@ docker logs apps-inkplate-1 -f
   day.
 - **Screen switcher** (top of the pane) — *Dashboard* or *Daily* (this
   week's calendar and the todo list beside the daily print; example data
-  until the calendar feed and planner exist — DECISIONS §26). The active one
-  is filled and bold.
+  until the calendar feed and planner exist — DECISIONS §26).
 - **Configuration** — **panel rotation** (0/90/180/270°,
   the panel's clockwise turn — 90° or 270° hangs it vertically and the
   dashboard switches to its portrait layout; the device still receives a
@@ -139,7 +138,7 @@ battery.
    `datasources.py` cached fetchers, degrade gracefully).
 2. Add it to the `SCREENS` dict.
 3. It appears in the control pane's Test patterns picker; to make it a
-   main screen, add it to `MAIN_SCREENS` and the switcher in
+   main screen, add it to `MAIN_SCREENS` in
    `static/index.html`. Check it in the
    preview — six inks is not many; bold shapes and dithered mid-tones work,
    subtle gradients don't.

@@ -192,32 +192,33 @@ English tokens (Buffon's beaver-gland diagrams, no thank you).
 ## 26. The daily screen, on example data (2026-11-21)
 A second real screen, `daily`, switched from the top of the pane
 (Dashboard / Daily; the old Screen dropdown now only picks test patterns).
-Portrait: this week's calendar (Monday to Sunday, `screens._week`, local
-date per §11; it moves on on Monday) and one todo list on the left, the
-daily print on the right half, full bleed: every plate covers the box (a
-figure too, cropped around its ink centroid, so unlike the dashboard this
-can cut ink; Adjust moves or shrinks it), opaque right up to the frame's
-edges, with its only fade on the box's inner left edge, over the first 15%
-of the box (`DAILY_FADE`) where it meets the calendar; caption top-right on the dashboard's lightened patch. Event
-titles may run on over the print. Landscape keeps the print to the right
-third with the list beside the calendar. The print has its own art layout,
-`daily`, used in both orientations; `panel_layout` returns it whenever the
+Portrait: this week's calendar (Monday to Sunday, local date per §11) and
+one todo list on the left, the daily print on the right half. The print is
+full bleed: every plate covers its box, a figure too, cropped around its
+ink centroid. Unlike the dashboard (§24) this deliberately cuts ink: the
+print reads as a picture filling its half, not a specimen on a sheet, and
+Adjust can move or shrink it. Its only fade is on the box's inner left
+edge, where it meets the calendar. Event titles may run on over the print
+but stop short of its caption. Landscape keeps the print to the right
+third with the list beside the calendar. The print has one art layout,
+`daily`, for both orientations; `panel_layout` returns it whenever the
 daily screen is up, so Adjust and the review page place the right thing,
 previewed at the panel's current orientation.
 
-On the panel, mid-tones dither into noise and text must stay solid, so the
-mockup's tints become solid inks: **today** is a solid yellow bar down the
+On the panel tints would dither to noise and text must stay solid, so
+everything is drawn in solid inks: **today** is a solid yellow bar down the
 left of its day block; a **done** item has an outlined (unfilled) tag in
 the owner's colour with a black letter, and its text and date are struck
-through. Owner tags always carry the letter (M blue, K red, MK yellow).
-The list is two open items per owner, then the three newest done. A week
-too busy to fit is squeezed to fewer lines per day ("+N more").
+through. Owner tags always carry the letter, never colour alone.
 
 **The calendar and list are example data.** The shared calendar feed and
 the planner service don't exist yet; `planner_stub.py` returns made-up
 events and todos shaped like their future data, generated relative to the
 current week, and the screen prints "Example data" along the bottom while
 it is in use. Replace the stub with the real sources, keeping the shape.
+The contract they must meet: events are per-day occurrences in local time;
+the adapter expands multi-day and overnight events into one entry per day;
+end times are dropped.
 
 ## 25. Per-image placement and a review page (2026-11-21)
 The automatic crop gets most plates right but not all (a mount card, a

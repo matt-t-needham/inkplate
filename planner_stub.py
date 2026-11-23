@@ -1,16 +1,10 @@
-"""EXAMPLE DATA for the daily screen, until its real sources exist.
-
-Everything here is made up. The shared calendar feed and the planner service
-the daily screen will read from don't exist yet, so this module stands in for
-both, shaped like the data they will return. While it is in use the screen
-draws an "Example data" footer (`example: True`), so nobody mistakes it for a
-real week. See DECISIONS §26.
-
-Events are generated relative to the current week, so the stub always shows
-this week whatever the date.
+"""EXAMPLE DATA, all made up, until the calendar feed and planner exist;
+`example: True` makes the screen say so. See DECISIONS §26.
 """
 
 from datetime import date, timedelta
+
+import screens
 
 # (weekday 0 = Monday, "HH:MM" | None | "all day", owner, title)
 _EVENTS = [
@@ -48,18 +42,16 @@ _DONE = [(1, "m", "Send invoice"), (2, "k", "Renew passport"),
          (3, "mk", "Fix shower door")]
 
 
-def week_start(today: date) -> date:
-    """The Monday of today's week: the calendar runs Monday to Sunday and
-    moves on to the new week on Monday."""
-    return today - timedelta(days=today.weekday())
-
-
 def get_planner(today: date) -> dict:
     """{"events": [{date, time, all_day, owner, title}], "todos": {"open":
     [{owner, title}], "done": [{owner, title, date}]}, "example": True}.
-    Dates are ISO strings; `time` is "HH:MM" or None (untimed or all day)."""
-    monday = week_start(today)
-    events = [{"date": (monday + timedelta(days=wd)).isoformat(),
+    Dates are ISO strings; `time` is "HH:MM" or None (untimed or all day).
+
+    The contract the real sources must meet: events are per-day occurrences
+    in local time; the adapter expands multi-day and overnight events into
+    one entry per day; end times are dropped."""
+    week = screens._week(today)
+    events = [{"date": week[wd].isoformat(),
                "time": None if t in (None, "all day") else t,
                "all_day": t == "all day", "owner": owner, "title": title}
               for wd, t, owner, title in _EVENTS]

@@ -95,7 +95,7 @@
     background:none; border:1px solid var(--red); color:var(--red);
     border-radius:7px; padding:5px 12px; font:inherit; cursor:pointer;
   }
-  button.danger:disabled, button.ghost:disabled { opacity:.5; cursor:default; }
+  button.danger:disabled, button.ghost:disabled, .switcher button:disabled { opacity:.5; cursor:default; }
   .msg { font-size:12px; } .msg.ok { color:var(--green); } .msg.err { color:var(--red); }
 
   /* Screen switcher: the active one is filled and bold, not just coloured. */
@@ -107,7 +107,6 @@
   }
   .switcher button + button { border-left:1px solid var(--surface1); }
   .switcher button[aria-pressed="true"] { background:var(--mauve); color:#11111b; font-weight:700; }
-  .switcher button:disabled { opacity:.5; cursor:default; }
 </style>
 </head>
 <body>

@@ -54,14 +54,39 @@ def test_daily_and_dashboard_placements_are_independent(data_dir, fake_data):
     assert screens.daily(1200, 1600).tobytes() == day.tobytes()
 
 
-def test_daily_renders_without_a_print(data_dir, fake_data, monkeypatch):
-    import datasources
+def test_daily_renders_without_a_print(data_dir, fake_data):
+    planner = {"events": [{"date": "2026-11-16", "time": "09:00", "owner": "m",
+                           "title": "Short"}], "todos": {}}
     missing = {**fake_data["animal"], "path": str(data_dir / "gone.jpg")}
     for animal in (None, missing):
-        monkeypatch.setattr(datasources, "get_animal", lambda **kw: animal)
-        img = screens.daily(1200, 1600)
-        # the print's half is paper (past where the longest example title ends)
-        assert img.crop((900, 0, 1200, 1600)).getextrema() == ((255, 255),) * 3
+        img = screens._daily(1200, 1600, animal, planner, date(2026, 11, 16))
+        # the art's half is paper
+        assert img.crop((600, 0, 1200, 1600)).getextrema() == ((255, 255),) * 3
+
+
+def _ink_runs(img, x0, x1):
+    """Vertical runs of rows with any ink between x0 and x1."""
+    runs, start = [], None
+    for y in range(img.height):
+        inked = any(img.getpixel((x, y)) != (255, 255, 255) for x in range(x0, x1))
+        if inked and start is None:
+            start = y
+        elif not inked and start is not None:
+            runs.append((start, y))
+            start = None
+    return runs
+
+
+def test_sparse_days_keep_their_date_column_clear_of_the_next_day():
+    """A day with one event or none is still as tall as its date and
+    weekday: the next day's date starts below the weekday label."""
+    planner = {"events": [{"date": "2026-11-16", "time": "09:00", "owner": "m",
+                           "title": "x"}], "todos": {}}
+    img = screens._daily(1200, 1600, None, planner, date(2026, 11, 18))
+    x = screens.DAILY_MARGIN + 4
+    runs = _ink_runs(img, x, x + 70)[:14]   # date number, weekday label, per day
+    assert len(runs) == 14
+    assert all(a[1] < b[0] for a, b in zip(runs, runs[1:]))
 
 
 def test_daily_print_is_full_bleed_and_fades_only_on_its_inner_edge():

@@ -11,7 +11,7 @@ Screens:
                     seasonal snow report; its own
                     portrait layout when taller than wide
 - daily           — this week's calendar and the todo list beside the daily
-                    print (example data until the planner exists)
+                    animal (example data until the planner exists)
 - placeholder     — proves the whole pipeline end to end
 - palette_test    — six solid color bands; verifies color mapping on the panel
 - dither_test     — gradients; judges dither quality
@@ -401,7 +401,7 @@ DEFAULT_PORTRAIT_LAYOUT = "hero"
 # string named by the caller of art_box/_draw_art; a new screen with its own
 # art box adds its key here.
 LANDSCAPE_LAYOUT = "landscape"
-DAILY_LAYOUT = "daily"     # the daily screen's print, in either orientation
+DAILY_LAYOUT = "daily"     # the daily screen's art, in either orientation
 ART_LAYOUTS = (LANDSCAPE_LAYOUT, *PORTRAIT_LAYOUTS, DAILY_LAYOUT)
 ART_LAYOUT_NAMES = {"landscape": "landscape layout", "hero": "portrait hero layout",
                     "stack": "portrait stack layout", "daily": "daily view"}
@@ -496,7 +496,7 @@ def normalize_placement(p) -> dict | None:
 
 
 def _animal(cfg: dict) -> dict | None:
-    """Today's print with its per-image settings, or None."""
+    """Today's animal with its per-image settings, or None."""
     return with_image_settings(
         datasources.get_animal(offset=cfg["animal_offset"],
                                period_days=cfg["animal_period_days"],
@@ -742,8 +742,6 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
         plate = plate.rotate(-rot, expand=True)
     sheet, sb, is_scene = _prep_plate(plate)
     art = sheet.crop(sb)
-    # Daily is full bleed: every plate covers its box, figures too (the
-    # crop is centred on the ink, and Adjust can move or shrink it).
     cover = is_scene or mode == "daily"
     if cover:
         scale = max(bw / art.width, bh / art.height)
@@ -763,7 +761,7 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
         # around its ink centroid, but only ever through paper — the window
         # is clamped so the ink span stays whole.
         if cover:
-            cx, cy = _ink_centroid(art) if not is_scene else (art.width / 2, art.height / 2)
+            cx, cy = (art.width / 2, art.height / 2) if is_scene else _ink_centroid(art)
             lo_x = lo_y = 0
             hi_x, hi_y = art.width - bw, art.height - bh
         else:
@@ -791,18 +789,17 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     drawn = None
     if placement:
         art, x, y, drawn = _place(sheet, sb, scale, origin, box, placement, mode, X, Y)
-    img.paste(art, (x, y), _art_mask(art, x, y, box, mode, X, Y))
+    img.paste(art, (x, y), _art_mask(art, x, box, mode, X, Y))
     return Art((x, y, x + art.width, y + art.height), drawn)
 
 
-def _art_mask(art: Image.Image, x: int, y: int, box, mode: str, X, Y) -> Image.Image:
+def _art_mask(art: Image.Image, x: int, box, mode: str, X, Y) -> Image.Image:
     """The edge fades for art pasted at x in its box. Widths are fixed on the
     panel, not a share of the image — otherwise a small plate fades over a
     few pixels and a large one over hundreds, which is what made the
     peacock dissolve early. Bleed art runs off the frame on the right, so
-    that edge is left hard unless a placement has pulled it inside. Daily
-    art fades in across the first DAILY_FADE of its *box*, wherever the
-    art itself starts, and has no other fade: it is full bleed."""
+    that edge is left hard unless a placement has pulled it inside.
+    Daily: see `_daily_mask`."""
     if mode == "daily":
         return _daily_mask(art, x, box)
     if mode == "centered":
@@ -913,12 +910,12 @@ def _caption_lines(d: ImageDraw.ImageDraw, animal: dict, font, max_w: int,
 
 
 def _draw_caption_lines(d: ImageDraw.ImageDraw, lines: list[str], font, right: int,
-                        top: int, Y, halo) -> None:
+                        top: int, Y, halo, line_h: int = 34) -> None:
     cy = top
     for ln in lines:
         d.text((right - d.textlength(ln, font=font), cy), ln, font=font,
                fill=BLACK, **halo)
-        cy += Y(34)
+        cy += Y(line_h)
 
 
 def _draw_caption(d: ImageDraw.ImageDraw, animal: dict | None, right: int, top: int,
@@ -1200,28 +1197,23 @@ def _snow_report(d, x, bottom, snow, X, Y, halo, name: str = "", align: str = "l
 
 
 # ── daily ─────────────────────────────────────────────────────────────────────
-# This week's calendar (Monday to Sunday) and one todo list on the left, the
-# daily print on the right. Portrait is the hanging that matters: calendar
-# above the list, the print filling the right half and faded in from its
-# left edge, event titles free to run on over it. Landscape keeps the print
-# to the right third and sets the list beside the calendar. No clock and no
-# date heading: the frame changes only when its content does.
-#
-# Owners are tagged by a filled box carrying the letter (never colour
-# alone): M blue, K red, MK yellow. On the panel mid-tones dither to noise,
-# so everything here is drawn in solid inks — today is marked by a solid
-# yellow bar down the left of its block, and a done item by an outlined
-# (unfilled) tag and a strike-through instead of the mockup's fade.
+# This week's calendar and the todo list beside the daily animal. No clock
+# and no date heading: the frame changes only when its content does. Solid
+# inks only, see DECISIONS §26.
 
-OWNERS = {"m": (BLUE, WHITE, "M"), "k": (RED, WHITE, "K"), "mk": (YELLOW, BLACK, "MK")}
-DAILY_FADE = 0.15          # the print fades in over this share of its box
+# owner → (tag colour, letter colour, letter): the letter is always drawn,
+# so an owner is never told by colour alone.
+DAILY_OWNERS = {"m": (BLUE, WHITE, "M"), "k": (RED, WHITE, "K"), "mk": (YELLOW, BLACK, "MK")}
+DAILY_FADE = 0.15          # the art fades in over this share of its box
 DAILY_LANDSCAPE_ART_X = 1060
+DAILY_LIST_X = 620         # landscape: the todo list's left edge
+DAILY_LIST_GAP = 28        # portrait: between the calendar and the list
 DAILY_MARGIN = 40
 DAILY_OPEN_PER_OWNER = 2   # open todos shown per owner (m, k, mk) ...
 DAILY_DONE_MAX = 3         # ... then at most this many done, newest first
 DAILY_DAY_MAX_EVENTS = 4   # lines per day before it is squeezed to fit
-EVENT_ROW_H = 36
-TODO_ROW_H = 58
+DAILY_EVENT_ROW_H = 36
+DAILY_TODO_ROW_H = 58
 
 
 def _daily_art_box(width: int, height: int):
@@ -1244,8 +1236,8 @@ def _daily_mask(art: Image.Image, x: int, box) -> Image.Image:
 
 
 def _week(today: date) -> list[date]:
-    """Monday to Sunday of today's week: it moves on to the new week on
-    Monday. `today` is local (the container's TZ, DECISIONS §11)."""
+    """Monday to Sunday of today's week. `today` is local (the container's
+    TZ, DECISIONS §11)."""
     monday = today - timedelta(days=today.weekday())
     return [monday + timedelta(days=i) for i in range(7)]
 
@@ -1255,9 +1247,9 @@ def _todo_rows(todos: dict) -> list[tuple[dict, bool]]:
     items per owner, interleaved M, K, MK, then the DAILY_DONE_MAX most
     recently done."""
     by_owner = {o: [t for t in todos.get("open") or [] if t.get("owner") == o]
-                [:DAILY_OPEN_PER_OWNER] for o in OWNERS}
+                [:DAILY_OPEN_PER_OWNER] for o in DAILY_OWNERS}
     open_rows = [by_owner[o][i] for i in range(DAILY_OPEN_PER_OWNER)
-                 for o in OWNERS if i < len(by_owner[o])]
+                 for o in DAILY_OWNERS if i < len(by_owner[o])]
     done = sorted(todos.get("done") or [], key=lambda t: t.get("date") or "",
                   reverse=True)[:DAILY_DONE_MAX]
     return [(t, False) for t in open_rows] + [(t, True) for t in done]
@@ -1279,10 +1271,10 @@ def _owner_tag(d: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, owner: st
     """A box with the owner's letter: filled in the owner's colour, or for a
     done item outlined in it with a black letter. An unknown owner gets no
     tag (and a warning) rather than a made-up one."""
-    if owner not in OWNERS:
+    if owner not in DAILY_OWNERS:
         log.warning("daily: unknown owner %r, drawing no tag", owner)
         return
-    bg, fg, letter = OWNERS[owner]
+    bg, fg, letter = DAILY_OWNERS[owner]
     if done:
         d.rectangle([x, y, x + w - 1, y + h - 1], fill=WHITE, outline=bg, width=outline)
         fg = BLACK
@@ -1310,14 +1302,15 @@ def _day_lines(events: list[dict], cap: int) -> list[dict | str]:
     return evs[:cap - 1] + [f"+{len(evs) - cap + 1} more"]
 
 
-def _draw_calendar(img: Image.Image, d: ImageDraw.ImageDraw, events: list[dict],
-                   today: date, x: int, top: int, bottom: int, title_right: int,
-                   X, Y) -> int:
+def _draw_calendar(d: ImageDraw.ImageDraw, events: list[dict], today: date, x: int,
+                   top: int, bottom: int, title_right: int, X, Y, avoid=None) -> int:
     """The week, one block per day: date and weekday in a left column, then
     a line per event — time (bold, its own column; ALL DAY in small caps;
     blank when untimed), owner tag, title. Titles may run on past the
-    column (over the print) up to `title_right`. Days are squeezed to fewer
-    lines each until the week fits above `bottom`. Returns its bottom."""
+    column (over the art) up to `title_right`, or stop short of the `avoid`
+    rectangle on the lines beside it. A block is never shorter than its
+    date column. Days are squeezed to fewer lines each until the week fits
+    above `bottom`. Returns its bottom."""
     f_num = _font(Y(42), bold=True)
     f_wd = _font(Y(17), bold=True)
     f_time = _font(Y(26), bold=True)
@@ -1328,10 +1321,12 @@ def _draw_calendar(img: Image.Image, d: ImageDraw.ImageDraw, events: list[dict],
     week = _week(today)
     by_day = {dy.isoformat(): [e for e in events if e.get("date") == dy.isoformat()]
               for dy in week}
-    pad, gap, row = Y(6), Y(10), Y(EVENT_ROW_H)
+    pad, gap, row = Y(6), Y(10), Y(DAILY_EVENT_ROW_H)
+    wd_y = Y(46)                     # the weekday label, below the date number
+    date_col = wd_y + d.textbbox((0, 0), "MTWFS", font=f_wd)[3]
 
     def heights(cap):
-        return [2 * pad + row * max(1, len(_day_lines(by_day[dy.isoformat()], cap)))
+        return [2 * pad + max(date_col, row * len(_day_lines(by_day[dy.isoformat()], cap)))
                 for dy in week]
     cap = DAILY_DAY_MAX_EVENTS
     while cap > 1 and top + sum(heights(cap)) + gap * 6 > bottom:
@@ -1350,7 +1345,7 @@ def _draw_calendar(img: Image.Image, d: ImageDraw.ImageDraw, events: list[dict],
         num = str(dy.day)
         d.text((x, y + pad - d.textbbox((0, 0), num, font=f_num)[1]), num,
                font=f_num, fill=BLACK)
-        _spaced(d, x + X(1), y + pad + Y(46), dy.strftime("%a").upper(), f_wd, X(2), BLACK)
+        _spaced(d, x + X(1), y + pad + wd_y, dy.strftime("%a").upper(), f_wd, X(2), BLACK)
         ly = y + pad
         for ev in _day_lines(by_day[dy.isoformat()], cap):
             mid = ly + row // 2
@@ -1364,7 +1359,10 @@ def _draw_calendar(img: Image.Image, d: ImageDraw.ImageDraw, events: list[dict],
             elif ev.get("time"):
                 d.text((time_x, mid), ev["time"], font=f_time, fill=BLACK, anchor="lm")
             _owner_tag(d, tag_x, mid - tag_h // 2, tag_w, tag_h, ev.get("owner"), f_tag)
-            title = _fit(d, ev.get("title") or "", f_title, title_right - title_x)
+            right = title_right
+            if avoid and ly < avoid[3] and ly + row > avoid[1]:
+                right = min(right, avoid[0] - X(16))
+            title = _fit(d, ev.get("title") or "", f_title, right - title_x)
             d.text((title_x, mid), title, font=f_title, fill=BLACK, anchor="lm", **halo)
             ly += row
         y += h + gap
@@ -1379,7 +1377,7 @@ def _draw_todos(d: ImageDraw.ImageDraw, todos: dict, x: int, top: int, width: in
     end (done first)."""
     f_tag = _font(Y(26), bold=True)
     f_txt = _font(Y(28))
-    row = Y(TODO_ROW_H)
+    row = Y(DAILY_TODO_ROW_H)
     rows = _todo_rows(todos)[:max(0, (bottom - top) // row)]
     tag_w, tag_h = X(64), Y(42)
     rule = max(1, Y(2))
@@ -1403,37 +1401,35 @@ def _draw_todos(d: ImageDraw.ImageDraw, todos: dict, x: int, top: int, width: in
         if when:
             d.text((right, mid), when, font=f_txt, fill=BLACK, anchor="rm")
         if done:
-            sw = max(1, Y(2))
-            d.line([(tx, mid), (tx + d.textlength(text, font=f_txt), mid)], fill=BLACK, width=sw)
+            d.line([(tx, mid), (tx + d.textlength(text, font=f_txt), mid)], fill=BLACK, width=rule)
             if when:
-                d.line([(right - ww, mid), (right, mid)], fill=BLACK, width=sw)
+                d.line([(right - ww, mid), (right, mid)], fill=BLACK, width=rule)
         d.rectangle([x, y0 + row - rule, right, y0 + row - 1], fill=BLACK)
 
 
 def _draw_daily_caption(img: Image.Image, animal: dict, art_rect, right: int, top: int,
-                        X, Y) -> None:
+                        X, Y) -> tuple[int, int, int, int]:
     """The animal's name in bold over the caption as one italic paragraph,
-    right-aligned at the top of the print, with the dashboard's lightened
-    patch under it."""
+    right-aligned at the top of the art, with the dashboard's lightened
+    patch under it. Returns the caption's rectangle."""
     d = ImageDraw.Draw(img)
     f_name = _font(Y(36), bold=True)
     f_cap = _font(Y(28), style="serif_italic")
     name = animal.get("common_name", "").capitalize()
     lines = _wrap(d, " · ".join(_caption_parts(animal, name=False)), f_cap, X(400))[:4]
-    lh = Y(36)
+    lh = 36
     cap_top = top + Y(50)
     w = max([d.textlength(name, font=f_name)] + [d.textlength(ln, font=f_cap) for ln in lines])
-    rect = (int(right - w), top, right, cap_top + lh * len(lines))
+    rect = (int(right - w), top, right, cap_top + Y(lh) * len(lines))
     if _overlaps(rect, art_rect):
         _fade_behind(img, rect, X, Y)
     d.text((right, top), name, font=f_name, fill=BLACK, anchor="ra")
-    for i, ln in enumerate(lines):
-        d.text((right - d.textlength(ln, font=f_cap), cap_top + i * lh), ln,
-               font=f_cap, fill=BLACK)
+    _draw_caption_lines(d, lines, f_cap, right, cap_top, Y, {}, line_h=lh)
+    return rect
 
 
 def daily(width: int, height: int) -> Image.Image:
-    """This week's calendar and the todo list beside the daily print. The
+    """This week's calendar and the todo list beside the daily animal. The
     calendar and list are example data (planner_stub) until the shared
     calendar feed and the planner service exist."""
     import state
@@ -1449,11 +1445,12 @@ def _daily(width: int, height: int, animal: dict | None, planner: dict,
     portrait = height > width
     X, Y = _scalers(width, height, PORTRAIT if portrait else LANDSCAPE)
     box = _daily_art_box(width, height)
-    # A missing print (fetch failed, unreadable file) leaves the half as paper.
+    # A missing image (fetch failed, unreadable file) leaves its box as paper.
     art = _draw_art(img, animal, box, X, Y, mode="daily", layout=DAILY_LAYOUT)
+    caption = None
     if art:
-        _draw_daily_caption(img, animal, art.rect, width - X(DAILY_MARGIN),
-                            Y(DAILY_MARGIN), X, Y)
+        caption = _draw_daily_caption(img, animal, art.rect, width - X(DAILY_MARGIN),
+                                      Y(DAILY_MARGIN), X, Y)
     d = ImageDraw.Draw(img)
 
     f_foot = _font(Y(24))
@@ -1462,17 +1459,20 @@ def _daily(width: int, height: int, animal: dict | None, planner: dict,
         d.text((X(DAILY_MARGIN), foot_top), "Example data", font=f_foot, fill=BLACK)
     x, top = X(DAILY_MARGIN) + X(4), Y(DAILY_MARGIN) + Y(2)
     list_bottom = foot_top - Y(12)
+    events, todos = planner.get("events") or [], planner.get("todos") or {}
     if portrait:
-        cal_bottom = _draw_calendar(img, d, planner.get("events") or [], today, x, top,
-                                    Y(1000), width - X(DAILY_MARGIN), X, Y)
-        _draw_todos(d, planner.get("todos") or {}, X(DAILY_MARGIN), cal_bottom + Y(28),
+        # The list is measured first; the calendar gets everything above it.
+        list_h = len(_todo_rows(todos)) * Y(DAILY_TODO_ROW_H)
+        cal_bottom = _draw_calendar(d, events, today, x, top,
+                                    list_bottom - list_h - Y(DAILY_LIST_GAP),
+                                    width - X(DAILY_MARGIN), X, Y, avoid=caption)
+        _draw_todos(d, todos, X(DAILY_MARGIN), cal_bottom + Y(DAILY_LIST_GAP),
                     X(520), list_bottom, X, Y)
     else:
-        list_x = X(620)
-        _draw_calendar(img, d, planner.get("events") or [], today, x, top,
-                       list_bottom, list_x - X(24), X, Y)
-        _draw_todos(d, planner.get("todos") or {}, list_x, top, X(440),
-                    list_bottom, X, Y)
+        list_x = X(DAILY_LIST_X)
+        _draw_calendar(d, events, today, x, top, list_bottom, list_x - X(24), X, Y,
+                       avoid=caption)
+        _draw_todos(d, todos, list_x, top, X(440), list_bottom, X, Y)
     return img
 
 
