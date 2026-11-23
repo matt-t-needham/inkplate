@@ -84,9 +84,9 @@ def test_sparse_days_keep_their_date_column_clear_of_the_next_day():
                            "title": "x"}], "todos": {}}
     img = screens._daily(1200, 1600, None, planner, date(2026, 11, 18))
     x = screens.DAILY_MARGIN + 4
-    runs = _ink_runs(img, x, x + 70)[:14]   # date number, weekday label, per day
-    assert len(runs) == 14
-    assert all(a[1] < b[0] for a, b in zip(runs, runs[1:]))
+    # Date number and weekday label per day: if a date runs into the previous
+    # day's weekday label, two runs merge and the count drops.
+    assert len(_ink_runs(img, x, x + 70)) == 14
 
 
 def test_daily_print_is_full_bleed_and_fades_only_on_its_inner_edge():

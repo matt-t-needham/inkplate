@@ -4,8 +4,6 @@
 
 from datetime import date, timedelta
 
-import screens
-
 # (weekday 0 = Monday, "HH:MM" | None | "all day", owner, title)
 _EVENTS = [
     (0, "07:00", "m", "Gym"),
@@ -50,8 +48,8 @@ def get_planner(today: date) -> dict:
     The contract the real sources must meet: events are per-day occurrences
     in local time; the adapter expands multi-day and overnight events into
     one entry per day; end times are dropped."""
-    week = screens._week(today)
-    events = [{"date": week[wd].isoformat(),
+    monday = today - timedelta(days=today.weekday())
+    events = [{"date": (monday + timedelta(days=wd)).isoformat(),
                "time": None if t in (None, "all day") else t,
                "all_day": t == "all day", "owner": owner, "title": title}
               for wd, t, owner, title in _EVENTS]
