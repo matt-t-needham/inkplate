@@ -18,6 +18,7 @@ Screens:
 - alignment       — border, crosshairs, corner labels; catches offset/rotation
 """
 
+import contextvars
 import logging
 import math
 from datetime import date, datetime, timedelta
@@ -435,10 +436,11 @@ def panel_layout(cfg: dict, size: tuple[int, int]) -> str:
     return LANDSCAPE_LAYOUT
 
 
-# Per-image placement: the pane's Adjust control moves and scales an image
-# inside one layout's art box, after the automatic trim/crop/fit has placed
-# it. Placements are kept per layout (config image_placements[file][layout]),
-# because a nudge that suits the hero's centred box is wrong for a bleed. x and
+# Per-image placement: dragging the print on the pane or the review page
+# moves and scales an image inside one layout's art box, after the automatic
+# trim/crop/fit has placed it. Placements are kept per layout (config
+# image_placements[file][layout]), because a nudge that suits the hero's
+# centred box is wrong for a bleed. x and
 # y shift the subject's centre by that share of the box's width and height;
 # scale multiplies the automatic scale. Stored values are kept inside these
 # limits, and _draw_art also keeps the subject's centre inside the box, so an
@@ -516,28 +518,130 @@ def _dashboard(width: int, height: int, cfg: dict, data: dict):
 PRINT_SCREENS = ("dashboard", "daily")
 
 
-def page_preview(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int]):
+def _page(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int]):
     """The whole page `screen` (PRINT_SCREENS) would show at `size` with
     `animal` (with its image settings, as with_image_settings gives) as its
     print instead of today's, drawn by that screen's own code: the
     dashboard with today's weather and snow, the daily view with its
-    example planner data (labelled on the page). Returns (image, the art
-    box the print's placement is relative to, the placement as drawn after
-    clamping; None for the automatic fit)."""
+    example planner data (labelled on the page). Returns (image, the Art
+    drawn or None, the art box the print's placement is relative to, the
+    box's _draw_art mode)."""
     width, height = size
     if screen == "daily":
         import planner_stub
         today = date.today()
         img, art = _daily(width, height, animal, planner_stub.get_planner(today), today)
-        box, _ = art_box(width, height, DAILY_LAYOUT, False)
+        box, mode = art_box(width, height, DAILY_LAYOUT, False)
     elif screen == "dashboard":
         data = _dashboard_data(cfg, animal)
         img, art = _dashboard(width, height, cfg, data)
-        box, _ = art_box(width, height, panel_layout({**cfg, "screen": screen}, size),
-                         bool(data["snow"]))
+        box, mode = art_box(width, height, panel_layout({**cfg, "screen": screen}, size),
+                            bool(data["snow"]))
     else:
         raise ValueError(f"no print on screen {screen!r}")
+    return img, art, box, mode
+
+
+def page_preview(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int]):
+    """_page as (image, art box, the placement as drawn after clamping; None
+    for the automatic fit)."""
+    img, art, box, _ = _page(screen, animal, cfg, size)
     return img, box, art.placement if art else None
+
+
+def page_layers(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int],
+                long_side: int) -> dict:
+    """The page split in two for the browser to move the print live
+    (DECISIONS §29), scaled so the long side is at most `long_side` px:
+    - "page": RGBA, everything but the art — transparent where the art
+      shows, partly opaque where a lightened patch or a halo lies over it.
+    - "art": RGBA, the plate at its drawn placement and scale, not clipped
+      to the box (up to a box's size beyond it each way, as far as a drag
+      can reveal), its own edges faded as the mode fades them; with "rect"
+      (where it lies) and "centre" (the subject's centre) in frame px.
+      None when no print could be drawn.
+    White, then the art clipped to the box, then the page, is the full
+    render before dithering, give or take the fades the box's inner sides
+    ("fades": side → frame px) add where the art is cut there.
+    Also "box", "auto" (the automatic fit's subject centre, which a
+    placement shifts from, frame px) and "placement" as drawn."""
+    f = min(1.0, long_side / max(size))
+    token = _ART_FILL.set(WHITE)
+    try:
+        on_white, art, box, mode = _page(screen, animal, cfg, size)
+    finally:
+        _ART_FILL.reset(token)
+    token = _ART_FILL.set(BLACK)
+    try:
+        on_black = _page(screen, animal, cfg, size)[0]
+    finally:
+        _ART_FILL.reset(token)
+    page = _unblend(on_white, on_black)
+    if f < 1:
+        page = page.resize((round(page.width * f), round(page.height * f)), Image.LANCZOS)
+    X, Y = _scalers(*size, PORTRAIT if size[1] > size[0] else LANDSCAPE)
+    out = {"page": page, "art": None, "box": list(box), "auto": None,
+           "fades": box_fades(box, size, mode, X, Y),
+           "placement": (art.placement if art else None) or dict(DEFAULT_PLACEMENT)}
+    if art and art.geom:
+        g = art.geom
+        sw, sh = g.sb[2] - g.sb[0], g.sb[3] - g.sb[1]
+        out["auto"] = [g.origin[0] + sw * g.scale / 2, g.origin[1] + sh * g.scale / 2]
+        out["art"] = _art_layer(g, out["placement"], f)
+    return out
+
+
+def _unblend(on_white: Image.Image, on_black: Image.Image) -> Image.Image:
+    """What was drawn over the art box, as RGBA, from the page drawn with
+    the box white and with it black: where those differ by d the overlay's
+    alpha is 255 - d, and its colour is the black version over that alpha."""
+    from PIL import ImageChops, ImageMath
+    alpha = ImageChops.invert(ImageChops.subtract(on_white, on_black).convert("L"))
+    bands = [ImageMath.lambda_eval(
+        lambda e: e["convert"](e["min"](e["b"] * 255 / e["max"](e["a"], 1), 255), "L"),
+        a=alpha, b=band) for band in on_black.split()]
+    return Image.merge("RGBA", (*bands, alpha))
+
+
+def _art_layer(g: "ArtGeom", placement: dict, f: float) -> dict:
+    """The plate at `placement`, unclipped by the art box, at `f` of frame
+    scale: {"image" (RGBA), "rect", "centre", "scale"} with frame-px rect
+    and centre, and the placement scale it was drawn at."""
+    bx0, by0, bx1, by1 = g.box
+    bw, bh = bx1 - bx0, by1 - by0
+    sw, sh = g.sb[2] - g.sb[0], g.sb[3] - g.sb[1]
+    ncx, ncy, s, _ = _placed_centre(g, placement)
+    ox, oy = ncx - sw * s / 2, ncy - sh * s / 2   # the subject box's top-left
+    ex, ey = g.X(_context(g.mode)) / s, g.Y(_context(g.mode)) / s
+    # The sheet around the subject, as far as a drag of one box can bring
+    # into view (sheet px).
+    sx0 = max(0.0, g.sb[0] - ex, g.sb[0] + (bx0 - bw - ox) / s)
+    sy0 = max(0.0, g.sb[1] - ey, g.sb[1] + (by0 - bh - oy) / s)
+    sx1 = min(g.sheet.width, g.sb[2] + ex, g.sb[0] + (bx1 + bw - ox) / s)
+    sy1 = min(g.sheet.height, g.sb[3] + ey, g.sb[1] + (by1 + bh - oy) / s)
+    rect = [ox + (sx0 - g.sb[0]) * s, oy + (sy0 - g.sb[1]) * s,
+            ox + (sx1 - g.sb[0]) * s, oy + (sy1 - g.sb[1]) * s]
+    w = max(1, round((rect[2] - rect[0]) * f))
+    h = max(1, round((rect[3] - rect[1]) * f))
+    img = g.sheet.resize((w, h), Image.LANCZOS, box=(sx0, sy0, sx1, sy1)).convert("RGBA")
+    if g.mode != "daily":
+        # Its own edges fade as the dashboard fades the art's (the daily
+        # view fades only at its box, which box_fades covers). Placed clear
+        # of a pretend frame's border so every side fades.
+        Xf, Yf = (lambda v: g.X(v) * f), (lambda v: g.Y(v) * f)
+        img.putalpha(_art_mask(img, 1, 1, (0, 0, w, h), (w + 2, h + 2), g.mode, Xf, Yf))
+    return {"image": img, "rect": [round(v, 2) for v in rect],
+            "centre": [round(ncx, 2), round(ncy, 2)], "scale": placement["scale"]}
+
+
+def box_fades(box, frame, mode: str, X, Y) -> dict:
+    """The fades _art_mask gives art cut by the box's sides: {side: frame
+    px} for each side of the box not on the frame's border."""
+    bw, bh = box[2] - box[0], box[3] - box[1]
+    fades = _fade_widths(mode, bw, bh, X, Y)
+    on_border = {"left": box[0] <= 0, "top": box[1] <= 0,
+                 "right": box[2] >= frame[0], "bottom": box[3] >= frame[1]}
+    return {k: round(v, 1) for k, v in fades.items() if not on_border[k]}
 
 
 def _scalers(width: int, height: int, base: tuple[int, int]):
@@ -574,19 +678,6 @@ def art_box(width: int, height: int, layout: str, snow: bool):
     # so the box reaches under it — a wide plate's left edge is inside the
     # fade by then — and runs to the bottom border.
     return (X(440), Y(140), width, height), "bleed"
-
-
-def art_preview(animal: dict, cfg: dict, layout: str, size: tuple[int, int]):
-    """The art alone, drawn exactly as the dashboard draws it in `layout`
-    (same box, mode, crop, fades and that layout's placement) on a white
-    frame of `size`, cropped to its art box. Returns (image, placement as
-    drawn after clamping to the box, None for the automatic fit)."""
-    width, height = size
-    X, Y = _scalers(width, height, PORTRAIT if height > width else LANDSCAPE)
-    box, mode = art_box(width, height, layout, bool(cfg.get("show_snow")))
-    img = Image.new("RGB", (width, height), WHITE)
-    art = _draw_art(img, animal, box, X, Y, mode=mode, layout=layout)
-    return img.crop(box), art.placement if art else None
 
 
 def _dashboard_landscape(width: int, height: int, cfg: dict, data: dict):
@@ -703,9 +794,35 @@ def _ink_span(art: Image.Image) -> tuple[float, float, float, float]:
             x1 * art.width / sw, y1 * art.height / sh)
 
 
+class ArtGeom(NamedTuple):
+    """How _draw_art fitted a plate, before any placement: the prepared
+    sheet, its subject box `sb` (sheet px), the automatic `scale`, and
+    `origin`, where the scaled subject box's top-left lands in the frame.
+    page_layers redraws the art from it at any placement."""
+    sheet: Image.Image
+    sb: tuple[int, int, int, int]
+    scale: float
+    origin: tuple[float, float]
+    box: tuple[int, int, int, int]
+    mode: str
+    X: object
+    Y: object
+
+
 class Art(NamedTuple):
     rect: tuple[int, int, int, int]   # where the art was pasted, frame px
     placement: dict | None            # as drawn, after clamping; None = automatic
+    geom: ArtGeom | None = None
+
+
+# page_layers draws a page twice with the art's box filled with one colour
+# (white, then black) instead of the art, to lift off what lies over it.
+_ART_FILL: contextvars.ContextVar = contextvars.ContextVar("art_fill", default=None)
+
+
+def _context(mode: str) -> int:
+    """Panel px of sheet drawn around the subject: the hero's paper margin."""
+    return HERO_CONTEXT if mode == "centered" else 0
 
 
 def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
@@ -718,7 +835,7 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
     centroid, never through ink); a scene covers the box.
     `animal["rotation"]` (clockwise degrees, from config) turns a plate
     that was scanned sideways before anything else looks at it.
-    `animal["placements"][layout]` (the pane's Adjust for this art layout,
+    `animal["placements"][layout]` (the print as dragged, for this art layout,
     a string the caller names; see PLACEMENT_SHIFT) then moves and scales
     the result inside the box; no entry draws it exactly as the automatic
     fit does.
@@ -806,11 +923,30 @@ def _draw_art(img: Image.Image, animal: dict | None, box, X, Y,
         x = bx1 - (art.width if cover else round(art.width * (1 - ART_BLEED)))
         y = by0 + (bh - art.height) // 2
         origin = (x - ox, y - oy)
+    geom = ArtGeom(sheet, sb, scale, origin, box, mode, X, Y)
     drawn = None
     if placement:
-        art, x, y, drawn = _place(sheet, sb, scale, origin, box, placement, mode, X, Y)
-    img.paste(art, (x, y), _art_mask(art, x, y, box, img.size, mode, X, Y))
-    return Art((x, y, x + art.width, y + art.height), drawn)
+        art, x, y, drawn = _place(geom, placement)
+    fill = _ART_FILL.get()
+    if fill is None:
+        img.paste(art, (x, y), _art_mask(art, x, y, box, img.size, mode, X, Y))
+    else:
+        img.paste(fill, (max(0, bx0), max(0, by0), min(img.width, bx1), min(img.height, by1)))
+    return Art((x, y, x + art.width, y + art.height), drawn, geom)
+
+
+def _fade_widths(mode: str, w: float, h: float, X, Y) -> dict:
+    """Each side's fade, frame px, for art (dashboard modes) or a box (the
+    daily view's) of w x h."""
+    if mode == "daily":
+        return {"left": max(1.0, w * DAILY_FADE)}
+    if mode == "centered":
+        fx, fy = X(HERO_FADE), Y(HERO_FADE)
+        fades = {"left": fx, "right": fx, "top": fy, "bottom": fy}
+    else:
+        fades = {"left": X(ART_FADE_LEFT), "right": X(ART_FADE_EDGE),
+                 "top": Y(ART_FADE_EDGE), "bottom": Y(ART_FADE_EDGE)}
+    return {k: min(v, 0.45 * (w if k in ("left", "right") else h)) for k, v in fades.items()}
 
 
 def _art_mask(art: Image.Image, x: int, y: int, box, frame, mode: str, X, Y) -> Image.Image:
@@ -829,17 +965,10 @@ def _art_mask(art: Image.Image, x: int, y: int, box, frame, mode: str, X, Y) -> 
     W, H = frame
     w, h = art.size
     if mode == "daily":
-        fades = {"left": max(1.0, (box[2] - box[0]) * DAILY_FADE)}
+        fades = _fade_widths(mode, box[2] - box[0], box[3] - box[1], X, Y)
         lo, hi = (box[0], box[1]), (box[2], box[3])
     else:
-        if mode == "centered":
-            fx, fy = X(HERO_FADE), Y(HERO_FADE)
-            fades = {"left": fx, "right": fx, "top": fy, "bottom": fy}
-        else:
-            fades = {"left": X(ART_FADE_LEFT), "right": X(ART_FADE_EDGE),
-                     "top": Y(ART_FADE_EDGE), "bottom": Y(ART_FADE_EDGE)}
-        fades = {k: min(v, 0.45 * (w if k in ("left", "right") else h))
-                 for k, v in fades.items()}
+        fades = _fade_widths(mode, w, h, X, Y)
         lo, hi = (x, y), (x + w, y + h)
     # A side on the frame's border never fades.
     if x <= 0:
@@ -870,25 +999,31 @@ def _art_mask(art: Image.Image, x: int, y: int, box, frame, mode: str, X, Y) -> 
     return ImageChops.darker(hx.resize((w, h)), vy.resize((w, h)))
 
 
-def _place(sheet: Image.Image, sb, scale: float, origin, box, placement: dict,
-           mode: str, X, Y):
-    """Apply a saved placement to art the automatic fit put at `origin`
-    (where the scaled subject box's top-left lands) and `scale`: scale about
-    the subject's centre, then shift it by a share of the box. The pixels
-    are resampled from the sheet, not from the fitted bitmap, so a zoom
-    stays sharp. Returns (image, x, y, placement as drawn)."""
-    bx0, by0, bx1, by1 = box
+def _placed_centre(g: ArtGeom, placement: dict):
+    """Where a placement puts the subject's centre (frame px) and at what
+    scale: scaled about the automatic fit's centre, then shifted by a share
+    of the box, the centre kept inside the box. Returns (cx, cy, scale,
+    the placement as drawn after that clamp)."""
+    bx0, by0, bx1, by1 = g.box
     bw, bh = bx1 - bx0, by1 - by0
-    sw, sh = sb[2] - sb[0], sb[3] - sb[1]
-    cx, cy = origin[0] + sw * scale / 2, origin[1] + sh * scale / 2
-    s = scale * placement["scale"]
+    sw, sh = g.sb[2] - g.sb[0], g.sb[3] - g.sb[1]
+    cx, cy = g.origin[0] + sw * g.scale / 2, g.origin[1] + sh * g.scale / 2
     ncx = max(bx0, min(bx1, cx + placement["x"] * bw))
     ncy = max(by0, min(by1, cy + placement["y"] * bh))
     drawn = {"x": round((ncx - cx) / bw, 4), "y": round((ncy - cy) / bh, 4),
              "scale": placement["scale"]}
-    art, x, y = _with_context(sheet, sb, s, (ncx - sw * s / 2, ncy - sh * s / 2),
-                              box, X, Y,
-                              context=HERO_CONTEXT if mode == "centered" else 0)
+    return ncx, ncy, g.scale * placement["scale"], drawn
+
+
+def _place(g: ArtGeom, placement: dict):
+    """Apply a saved placement to art the automatic fit put at g.origin and
+    g.scale. The pixels are resampled from the sheet, not from the fitted
+    bitmap, so a zoom stays sharp. Returns (image, x, y, placement as
+    drawn)."""
+    sw, sh = g.sb[2] - g.sb[0], g.sb[3] - g.sb[1]
+    ncx, ncy, s, drawn = _placed_centre(g, placement)
+    art, x, y = _with_context(g.sheet, g.sb, s, (ncx - sw * s / 2, ncy - sh * s / 2),
+                              g.box, g.X, g.Y, context=_context(g.mode))
     return art, x, y, drawn
 
 

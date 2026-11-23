@@ -67,12 +67,7 @@
   .nav .next { background: var(--bix-accent, #fab387); color: var(--bix-on-accent, #1e1e2e);
                border-color: var(--bix-accent, #fab387); font-weight: 500; }
   .name::first-letter { text-transform: uppercase; }
-  /* Placement controls, packed: the scale row, then Reset beside its status
-     and the layout it places for. The numbers show only on a wide screen. */
-  #adj .adj { flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 10px;
-              row-gap: 4px; }
-  #adj .adj-row:first-child { flex-basis: 100%; }
-  #adj .adj-pos { display: none; }
+  #adj .pl-ctl { gap: 4px; }
   #adj[hidden] { display: none; }
 
   .toast { position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 16px);
@@ -89,7 +84,6 @@
     aside { width: 360px; max-height: none; border-top: 0;
             border-left: 1px solid var(--bix-border, #313244); padding: 20px 24px; gap: 12px; }
     .nav { margin-top: auto; }
-    #adj .adj-pos { display: block; flex-basis: 100%; }
   }
 </style>
 </head>
@@ -226,9 +220,12 @@ function show() {
   unmount();
   $('adj').hidden = false;
   ctlFile = a.file + '|' + screen;
+  const shown = screen;
   ctl = Placement.mount({stage: $('stage'), controls: $('adj')}, {
-    file: a.file, layout: lay.key, layoutName: lay.name, screen, fit: true,
-    placement: a.placements[lay.key],
+    restUrl: () => 'api/page-preview.png?' +
+      new URLSearchParams({file: a.file, screen: shown, t: Date.now()}),
+    file: a.file, screen, layoutName: lay.name, fit: true, plainWheel: true, outline: true,
+    alt: 'The whole page with this print, as the panel will show it',
     // The queue may have been refreshed by a poll since this was mounted.
     onSaved: s => { for (const i of items) if (i.animal && i.animal.file === s.file) i.animal = s; },
   });

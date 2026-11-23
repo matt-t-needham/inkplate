@@ -43,16 +43,12 @@
   }
   .col { display:flex; flex-direction:column; gap:18px; min-width:0; }
 
-  /* Preview */
-  #preview-img {
-    width:100%; aspect-ratio:4/3; object-fit:contain; border-radius:6px;
-    background:#11111b; display:block; border:1px solid var(--surface1);
-  }
-  /* Panel hung vertically: previews are upright (what's on the wall), so the
-     box turns with it — kept to a sane height instead of the full column. */
-  #preview-img.portrait {
-    aspect-ratio:3/4; width:auto; max-width:100%; height:min(78vh, 900px); margin:0 auto;
-  }
+  /* Preview: the panel simulation, the print dragged on it (placement.js).
+     Panel hung vertically: previews are upright (what's on the wall), so the
+     frame turns with it, kept to a sane height instead of the full column. */
+  #preview.portrait { --pl-maxh: min(78vh, 900px); }
+  #preview-ctl:empty { display:none; }
+  #preview-ctl { margin-top:10px; }
   .preview-bar { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
   .meta-line { color:var(--subtext); font-size:12px; margin-top:8px; }
 
@@ -126,7 +122,8 @@
 <main>
   <div class="col">
     <div class="card">
-      <img id="preview-img" alt="dashboard preview">
+      <div id="preview"></div>
+      <div id="preview-ctl"></div>
       <div class="preview-bar">
         <button class="primary" id="btn-render">Render now → push</button>
         <button class="ghost" id="btn-cycle-animal">Next animal</button>
@@ -149,10 +146,8 @@
         <div class="sub" id="now-animal-sub"></div>
         <div class="btn-row">
           <button class="ghost" id="btn-rotate-animal" title="Turn the plate a quarter clockwise — for a scan bound in sideways. Remembered for this image.">Rotate ↻</button>
-          <button class="ghost" id="btn-adjust-animal" aria-expanded="false" title="Move and scale the print within its own area. Remembered for this image.">Adjust</button>
           <button class="danger" id="btn-veto-animal">Veto image</button>
         </div>
-        <div id="adjust-box" hidden style="margin-top:12px"></div>
         <div class="meta-line"><a href="review" style="color:var(--text)">Review upcoming prints</a></div>
       </div>
     </div>
@@ -195,7 +190,6 @@
 // All URLs are relative on purpose: this page is served both at :3008/ and at
 // the metrics site under /inkplate/ — absolute paths would break the latter.
 const $ = id => document.getElementById(id);
-let stateCache = null;
 
 function ago(ts) {
   const s = Math.max(0, (Date.now()/1000) - ts);
@@ -205,8 +199,32 @@ function ago(ts) {
   return Math.round(s/86400) + 'd ago';
 }
 
+// The preview: the panel simulation, with the print dragged on it while
+// the panel shows a print screen (placement.js). Remounted when the print,
+// the screen, the art layout or the hanging changes.
+let pane = null, paneKey = null;
+function mountPreview(st) {
+  const a = st.current && st.current.animal;
+  const screen = st.config.screen;
+  const draggable = !!(a && a.file && MAIN_SCREENS.includes(screen));
+  const rot = st.config.rotation, portrait = rot === 90 || rot === 270;
+  const key = [draggable ? a.file : '', screen, st.art_layout.key, rot].join('|');
+  if (pane && key === paneKey) return;
+  if (pane) pane.destroy();
+  paneKey = key;
+  $('preview').classList.toggle('portrait', portrait);
+  pane = Placement.mount({stage: $('preview'), controls: $('preview-ctl')}, {
+    restUrl: () => 'api/preview.png?mode=panel&t=' + Date.now(),
+    file: draggable ? a.file : null, screen: draggable ? screen : null,
+    layoutName: st.art_layout.name, aspect: portrait ? 3 / 4 : 4 / 3,
+    alt: 'The panel as it shows now',
+    onSaved: () => loadState(),
+  });
+}
+// Reload the drag layers too: a config change (snow, location) can move the
+// art box, and dragging against stale layers would save a different spot.
 function refreshPreviewImg() {
-  $('preview-img').src = 'api/preview.png?mode=panel&t=' + Date.now();
+  if (pane) pane.reload();
 }
 
 $('btn-render').addEventListener('click', async () => {
@@ -334,33 +352,7 @@ function renderNow(st) {
   ].filter(Boolean).join(' · ') : '';
   $('btn-veto-animal').disabled = !(a && a.file);
   $('btn-rotate-animal').disabled = !(a && a.file);
-  $('btn-adjust-animal').disabled = !(a && a.file);
-  // The animal or the layout changed under an open Adjust (next animal,
-  // veto, panel rotation or portrait layout): close it.
-  if (adjuster && !(a && a.file === adjuster.file && layout === adjuster.layout)) closeAdjust();
 }
-
-// ── Now showing: adjust ──
-let adjuster = null;
-function closeAdjust() {
-  if (adjuster) adjuster.ctl.destroy();
-  adjuster = null;
-  $('adjust-box').hidden = true;
-  $('btn-adjust-animal').setAttribute('aria-expanded', 'false');
-}
-$('btn-adjust-animal').addEventListener('click', () => {
-  if (adjuster) { closeAdjust(); return; }
-  const a = stateCache && stateCache.current && stateCache.current.animal;
-  if (!a || !a.file) return;
-  const layout = stateCache.art_layout;
-  $('adjust-box').hidden = false;
-  $('btn-adjust-animal').setAttribute('aria-expanded', 'true');
-  adjuster = {file: a.file, layout: layout.key, ctl: Placement.mount($('adjust-box'), {
-    file: a.file, layout: layout.key, layoutName: layout.name,
-    placement: a.placements[layout.key],
-    onSaved: async () => { await loadState(); refreshPreviewImg(); },
-  })};
-});
 
 async function veto(what, btn) {
   if (!confirm(`Veto this image? It's removed from rotation for good.`)) return;
@@ -378,8 +370,8 @@ async function rotateAnimal(btn) {
     await api('POST', 'api/rotate', {degrees: 90});
   } catch (e) { alert('Rotate failed: ' + e.message); }
   finally {
-    btn.disabled = false; await loadState(); refreshPreviewImg();
-    if (adjuster) adjuster.ctl.reload();
+    btn.disabled = false; await loadState();
+    if (pane) pane.reload();   // the layers too: the plate turned
   }
 }
 $('btn-rotate-animal').addEventListener('click', e => rotateAnimal(e.target));
@@ -396,12 +388,9 @@ function renderDeviceBadge(st) {
 }
 
 function renderState(st) {
-  stateCache = st;
   renderDeviceBadge(st);
   renderNow(st);
-
-  const rot = st.render ? (st.render.rotation || 0) : st.config.rotation;
-  $('preview-img').classList.toggle('portrait', rot === 90 || rot === 270);
+  mountPreview(st);
 
   // config form — don't clobber fields the user is editing
   const focused = document.activeElement && document.activeElement.id;
@@ -450,7 +439,7 @@ async function loadState() {
 }
 
 setInterval(loadState, 10000);
-loadState().then(refreshPreviewImg);
+loadState();
 </script>
 </body>
 </html>

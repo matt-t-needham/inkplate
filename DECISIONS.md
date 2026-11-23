@@ -189,6 +189,57 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 29. Drag the print on the page itself (2026-11-22)
+"The adjustment options need to be a grab and drag option from the panel
+itself, not the sidepanel with delayed update." The pane's **Adjust** side
+control is gone, and with it the render-on-release path: every drag used to
+ask the server for a full dithered render before anything moved, and the
+pane's control showed the art box alone, away from the page.
+
+Now the pane's panel preview and the review page's page preview are what
+you drag. One finger or the pointer moves the print; two fingers pinch it;
+ctrl/cmd + scroll (a trackpad pinch) resizes it, as does a plain scroll on
+the review page, which never scrolls itself; *Smaller* / *Larger*, the
+arrow keys and + / - do the same for anyone who can't drag. While a finger
+is down nothing is asked of the server: `/api/page-layers` has already
+split the page in two (`screens.page_layers`), and the browser moves one
+over the other.
+
+- **The page, lifted off the art.** The screen is drawn twice by its own
+  code with the art box filled white, then black, instead of the art
+  (`_ART_FILL`, a context variable `_draw_art` honours). Where the two
+  differ by d, what was drawn over the art has alpha 255 - d and the
+  black-filled colour over that alpha (`_unblend`), so halos, the
+  lightened patches under captions and text running over the print come
+  out as a transparent overlay, and stay readable over the moving print.
+- **The plate, unclipped.** `_draw_art` now returns how it fitted the plate
+  (`ArtGeom`: sheet, subject box, automatic scale and origin), and
+  `_art_layer` redraws it at the saved placement through the same
+  `_placed_centre` `_place` uses, as far beyond the box as a drag can bring
+  into view, its own edges faded as the mode fades them. The box's inner
+  sides get the rest of the fades as CSS masks (`box_fades`).
+- **What you see is what saves.** The browser clamps a draft exactly as
+  the server does (`PLACEMENT_SHIFT`, `PLACEMENT_SCALE`, the subject's
+  centre kept inside the box, relative to the automatic fit's centre the
+  layers report). Paper, the plate clipped to the box and the page over it
+  compose to the full render (pinned by a test), in the panel
+  simulation's tones (`palette.simulate_tones`, an affine fit from the
+  inks to `PANEL_SIM_PALETTE`), so the hand-over to the dithered picture
+  is only the dither. The fades are the one approximation: the server
+  fades the clipped art's edges, the live view the plate's and the box's.
+- **Release saves** (`/api/placement`, unchanged; keys, buttons and the
+  wheel after a 500 ms pause), the status reads Saving… / Saved / Save
+  failed and why, then the real picture (the panel render on the pane,
+  `/api/page-preview.png` on the review page) and fresh layers load in the
+  background and replace the live view. Next/Previous still wait for the
+  save.
+
+Removed: `/api/animal-preview.png` and `screens.art_preview` (the art box
+alone), the draft `x`/`y`/`scale` parameters of `/api/page-preview.png`
+(it now draws the saved placement), and the Adjust button. The layers are
+about a megabyte of WebP and take under a second, fetched once per print
+and after each save.
+
 ## 28. The review page is a queue on the whole page (2026-11-22)
 "The reviewing page needs to show it in the context of the page it will be
 displayed in, including the blurb and the other content … it's just a queue
@@ -297,7 +348,8 @@ area. No entry for the layout being drawn means the automatic fit, pixel for
 pixel. Malformed entries are dropped on load (nothing was deployed with the
 earlier one-placement-per-image shape, so there is no migration).
 
-The pane's **Adjust** and the **review page** (`/review`) share
+The pane's **Adjust** (replaced by dragging on the preview, §29) and the
+**review page** (`/review`) share
 `static/placement.js` and adjust the placement for the layout the panel is
 using now (named under the control). Saving is automatic: a released drag
 or slider saves, arrow-key nudges save after a 500 ms pause, *Reset to
