@@ -28,8 +28,8 @@ the panel):
   Buffon (Paris, 1749), Brehm (Leipzig, 1863), and — birds — Catesby (1731),
   Audubon (1827), Gould (1840). 227 animals with native ranges — land, air
   and a deep ocean section — every one verified to resolve; deterministic
-  daily pick; auto-cropped, paper cleaned, drawn as a soft edge-faded
-  background. Caption: *"Rhinoceros · Rhinoceros indicus · of South Asia · as
+  daily pick; auto-cropped, paper cleaned, drawn full bleed (opaque to
+  the panel's edges, faded only where it meets the weather). Caption: *"Rhinoceros · Rhinoceros indicus · of South Asia · as
   depicted by Conrad Gessner, Zürich, 1551"*. Falls back to yesterday's beast
   if Commons is down.
 
@@ -97,11 +97,13 @@ docker logs apps-inkplate-1 -f
   panel is using* (landscape, portrait hero or portrait stack each keep
   their own). Changes save themselves when a drag or the slider is
   released.
-- **Review upcoming prints** (`/review`) — the next 14 days' prints in the
-  order they will hang, each with its preview and the same move/scale,
-  rotate and veto actions, plus a *reviewed* mark so they can be worked
-  through. A print reviewed or adjusted here is the one that hangs on its
-  day.
+- **Review upcoming prints** (`/review`) — a queue of the next 28 days'
+  prints in the order they will hang, one at a time, opening at the first
+  not yet reviewed. Each is shown on the whole page it will hang on
+  (dashboard or daily, switchable, at the panel's orientation, as the panel
+  will show it), and is moved by dragging on the print, scaled, rotated or
+  vetoed there. *Previous* / *Next* save it and mark it reviewed. A print
+  reviewed or adjusted here is the one that hangs on its day.
 - **Screen switcher** (top of the pane) — *Dashboard* or *Daily* (this
   week's calendar and the todo list beside the daily print; example data
   until the calendar feed and planner exist — DECISIONS §26).

@@ -189,6 +189,57 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 28. The review page is a queue on the whole page (2026-11-22)
+"The reviewing page needs to show it in the context of the page it will be
+displayed in, including the blurb and the other content … it's just a queue
+of the whole list. When moving to the next one, the current one is saved."
+The card list (7/14/28-day picker, *Hide reviewed*, *Mark (not) reviewed*)
+is gone. `/review` is now one print at a time over the next `REVIEW_DAYS`
+(28) days, opening at `start`, the first print not reviewed yet (a day
+still fetching counts as not reviewed; a day with no print is passed over).
+
+The picture is the whole page: `/api/page-preview.png` draws the screen
+(dashboard or daily, a switch on the page, defaulting to the panel's) at
+the panel's current orientation through the screens' own code
+(`screens.page_preview`, which hands the print to `_dashboard` / `_daily`
+in place of today's), with today's cached weather and snow, or the daily
+view's labelled example data, dithered and simulated like the wall. It
+reports the art box as shares of the page (`X-Art-Box`), and
+`placement.js` lays a box over the picture there: a drag inside it moves
+the print, by shares of that box, exactly as the pane's Adjust does on the
+art box alone (the pane is the same code with the box as the whole
+picture). The placement is for the art layout the shown screen uses, so
+the switch also switches which placement is edited. The page fits the
+viewport and never scrolls; controls sit below it on a phone and beside it
+above 900 px.
+
+*Previous* and *Next* first let any pending save finish (a failed save
+stops the move and says so), then mark the print reviewed. There is no
+un-review: nothing used it once moving on is what marks a print. Unchanged:
+autosave on release, Rotate, Veto (asks first), the background fetch with
+a "Fetching…" wait for a day not fetched yet.
+
+## 27. Full bleed on the dashboard (2026-11-22)
+"Remove the fade of the image on the borders of the displays — it can be
+full opacity up to the edge of the display, full bleed!" Every art layout
+now follows the daily screen's rule (§26), in one mask (`_art_mask`): a side
+of the print that lies on the panel's border is opaque right up to it; every
+other side still fades, over the same fixed panel widths as before, because
+there the print meets other content (the hero's weather band, the stack's
+weather above it, the landscape weather and caption). To let prints reach
+the border, the hero's art box now runs to the top, left and right borders
+(it kept a 40 px `HERO_MARGIN` before; the caption still keeps it), and a
+covering plate (a scene) in the landscape and stack layouts fills its box
+exactly instead of being pushed `ART_BLEED` right, which left a faded strip
+on the stack's left border. A contained figure still bleeds `ART_BLEED` off
+the right as before. With the art opaque at the bottom border, the landscape
+and stack snow report gets the hero's lightened patch under it
+(`_fade_behind`) wherever it lands on the art.
+
+Saved placements stay valid (they are relative to the art box), but a
+hero placement made before this sits slightly differently, because its box
+grew by the old margin on three sides.
+
 ## 26. The daily screen, on example data (2026-11-21)
 A second real screen, `daily`, switched from the top of the pane
 (Dashboard / Daily; the old Screen dropdown now only picks test patterns).
@@ -244,11 +295,11 @@ picture is always a server render (`/api/animal-preview.png?layout=…`: the
 dashboard's own `art_box` + `_draw_art`, dithered to the six inks), never a
 CSS imitation — CSS only nudges the last render while a finger is down.
 
-The review page lists the next 14 days' prints. They come from the same
+The review page lists the coming days' prints (28 since §28). They come from the same
 slots (`slot_for`) and the same selection (`datasources._resolve`) as the
 panel; upcoming slots are fetched into `cache/upcoming/<slot>.*`, never over
 the panel's own `animal.*`. `/api/review` answers at once from that cache and
-fetches missing slots in the background (a cold 14-day fetch can outlast
+fetches missing slots in the background (a cold fetch of a fortnight can outlast
 Cloudflare's 100 s timeout); the page re-polls while any are pending.
 
 **When its day comes, the panel takes the upcoming print only if Matt

@@ -136,18 +136,26 @@ def test_dominant_run_prefers_the_inkiest_band():
     assert 20 <= a <= 21 and 58 <= b <= 60
 
 
-def test_edge_fade_mask_per_side():
-    m = screens._edge_fade_mask(200, 100, left=0.3, right=0.0, top=0.2, bottom=0.2)
-    assert m.size == (200, 100)
-    mid_y = 50
-    assert m.getpixel((0, mid_y)) == 0          # left edge fully transparent
-    assert m.getpixel((199, mid_y)) == 255      # right edge hard (no fade)
-    assert m.getpixel((100, mid_y)) == 255      # interior opaque
-    assert m.getpixel((150, 0)) == 0            # top still fades
-    assert m.getpixel((150, 99)) == 0           # bottom still fades
-    # left fade is monotonic across its 30%
-    ramp = [m.getpixel((x, mid_y)) for x in range(0, 60)]
-    assert ramp == sorted(ramp) and ramp[-1] > ramp[0]
+def test_dashboard_print_is_opaque_at_the_border_and_fades_on_inner_edges(data_dir, fake_data):
+    """Full bleed: wherever a dashboard print reaches the panel's border it
+    is opaque right up to it; where it meets other content (the stack's
+    weather above, the hero's weather band below) it still fades."""
+    import state
+    from PIL import Image
+    Image.new("RGB", (900, 1200), (20, 20, 20)).save(fake_data["animal"]["path"])
+    state.update_config(show_snow=False, portrait_layout="stack")
+    img = screens.dashboard(1200, 1600)
+    top = screens.art_box(1200, 1600, "stack", False)[0][1]
+    for xy in ((0, 1000), (1199, 1000), (600, 1599), (0, 1599)):
+        assert img.getpixel(xy)[0] < 40, xy                    # opaque at the border
+    assert img.getpixel((600, top))[0] > 200                    # inner top edge: faded out
+    assert img.getpixel((600, top + 400))[0] < 40
+    state.update_config(portrait_layout="hero")
+    img = screens.dashboard(1200, 1600)
+    bottom = screens.art_box(1200, 1600, "hero", False)[0][3]
+    for xy in ((0, 600), (1199, 600), (300, 0)):
+        assert img.getpixel(xy)[0] < 40, xy
+    assert img.getpixel((300, bottom - 1))[0] > 200             # against the weather band
 
 
 def test_all_glyph_kinds_render():
