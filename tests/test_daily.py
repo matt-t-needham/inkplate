@@ -11,25 +11,6 @@ def test_week_runs_monday_to_sunday_and_turns_over_on_monday():
     assert screens._week(monday)[0] == monday
 
 
-def _bar_rows(img):
-    """Rows of the frame where today's yellow bar is drawn (left of the dates)."""
-    return [y for y in range(img.height) if img.getpixel((30, y)) == screens.YELLOW]
-
-
-def test_only_todays_block_is_highlighted():
-    monday = date(2026, 11, 16)
-    planner = {"events": [{"date": (monday + timedelta(days=i)).isoformat(), "time": "09:00",
-                           "all_day": False, "owner": "m", "title": "x"} for i in range(7)],
-               "todos": {}}
-    spans = []
-    for today in (monday, monday + timedelta(days=6)):
-        rows = _bar_rows(screens._daily(1200, 1600, None, planner, today)[0])
-        assert rows and rows[-1] - rows[0] + 1 == len(rows)   # one unbroken block
-        assert len(rows) < 1600 // 7                         # ...and only one day's
-        spans.append(rows)
-    assert spans[0][-1] < spans[1][0]                        # Monday's above Sunday's
-
-
 def test_list_takes_two_open_per_owner_then_three_newest_done():
     open_ = [{"owner": o, "title": f"{o}{i}"} for o in ("mk", "k", "m") for i in range(5)]
     done = [{"owner": "m", "title": f"d{i}", "date": f"2026-11-{10 + i:02d}"} for i in range(5)]
@@ -115,3 +96,29 @@ def test_daily_figure_covers_its_box():
         art = screens._draw_art(Image.new("RGB", (1200, 1600), "white"), {"path": f.name},
                                 box, lambda v: v, lambda v: v, mode="daily", layout="daily")
     assert art.rect == box
+
+
+def _week_planner(monday):
+    return {"events": [{"date": (monday + timedelta(days=i)).isoformat(), "time": "11:00",
+                        "all_day": False, "owner": "m", "title": "Vet"} for i in range(7)],
+            "todos": {}}
+
+
+def test_days_before_today_are_faded_and_the_rest_full_strength():
+    monday = date(2026, 11, 16)
+    img, _ = screens._daily(1200, 1600, None, _week_planner(monday), monday + timedelta(days=3))
+    x = screens.DAILY_MARGIN + 4
+    numerals = _ink_runs(img, x, x + 70)[::2]            # date number, weekday, ...
+    assert len(numerals) == 7
+    darkest = [min(img.crop((x, y0, x + 70, y1)).convert("L").getdata()) for y0, y1 in numerals]
+    assert all(v > 60 for v in darkest[:3]), darkest     # Mon-Wed faded
+    assert all(v < 20 for v in darkest[3:]), darkest     # Thursday on at full strength
+
+
+def test_date_number_top_is_level_with_the_first_events_capitals():
+    monday = date(2026, 11, 16)
+    img, _ = screens._daily(1200, 1600, None, _week_planner(monday), monday)
+    x = screens.DAILY_MARGIN + 4
+    numeral = _ink_runs(img, x, x + 70)[0]
+    time_top = _ink_runs(img, x + 84, x + 150)[0][0]     # "11:00" in the time column
+    assert abs(numeral[0] - time_top) <= 1

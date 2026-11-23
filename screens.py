@@ -1390,12 +1390,16 @@ def _snow_report(d, x, bottom, snow, X, Y, halo, name: str = "", align: str = "l
 
 # ── daily ─────────────────────────────────────────────────────────────────────
 # This week's calendar and the todo list beside the daily animal. No clock
-# and no date heading: the frame changes only when its content does. Solid
-# inks only, see DECISIONS §26.
+# and no date heading: the frame changes only when its content does. Inks
+# and the faded past, see DECISIONS §26.
 
-# owner → (tag colour, letter colour, letter): the letter is always drawn,
-# so an owner is never told by colour alone.
-DAILY_OWNERS = {"m": (BLUE, WHITE, "M"), "k": (RED, WHITE, "K"), "mk": (YELLOW, BLACK, "MK")}
+# owner → (outline colour, letter): the letter is always drawn, so an owner
+# is never told by colour alone.
+DAILY_OWNERS = {"m": (BLUE, "M"), "k": (RED, "K"), "mk": (YELLOW, "MK")}
+# Days before today and done todos are drawn in this ink: a light grey that
+# dithers to a fine black-on-paper stipple, so the text reads as faded but
+# its letterforms hold (DECISIONS §26).
+DAILY_FADED = (110, 110, 110)
 DAILY_FADE = 0.15          # the art fades in over this share of its box
 DAILY_LANDSCAPE_ART_X = 1060
 DAILY_LIST_X = 620         # landscape: the todo list's left edge
@@ -1448,20 +1452,22 @@ def _spaced(d: ImageDraw.ImageDraw, x: int, y: int, text: str, font, spacing: in
 
 
 def _owner_tag(d: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, owner: str,
-               font, done: bool = False, outline: int = 3) -> None:
-    """A box with the owner's letter: filled in the owner's colour, or for a
-    done item outlined in it with a black letter. An unknown owner gets no
-    tag (and a warning) rather than a made-up one."""
+               font, outline: int = 3, faded: bool = False) -> None:
+    """A box outlined in the owner's colour with the letter inside, no fill.
+    Yellow is too pale to hold a thin line on its own, so its box gets a
+    one-pixel black edge outside. A faded tag keeps its colour, at half the
+    line weight, with a faded letter. An unknown owner gets no tag (and a
+    warning) rather than a made-up one."""
     if owner not in DAILY_OWNERS:
         log.warning("daily: unknown owner %r, drawing no tag", owner)
         return
-    bg, fg, letter = DAILY_OWNERS[owner]
-    if done:
-        d.rectangle([x, y, x + w - 1, y + h - 1], fill=WHITE, outline=bg, width=outline)
-        fg = BLACK
-    else:
-        d.rectangle([x, y, x + w - 1, y + h - 1], fill=bg)
-    _centered_text(d, (x + w / 2, y + h / 2), letter, font, fg)
+    colour, letter = DAILY_OWNERS[owner]
+    if faded:
+        outline = max(1, outline // 2)
+    if colour == YELLOW:
+        d.rectangle([x - 1, y - 1, x + w, y + h], outline=BLACK, width=1)
+    d.rectangle([x, y, x + w - 1, y + h - 1], fill=WHITE, outline=colour, width=outline)
+    _centered_text(d, (x + w / 2, y + h / 2), letter, font, DAILY_FADED if faded else BLACK)
 
 
 def _fit(d: ImageDraw.ImageDraw, text: str, font, max_w: int) -> str:
@@ -1485,26 +1491,31 @@ def _day_lines(events: list[dict], cap: int) -> list[dict | str]:
 
 def _draw_calendar(d: ImageDraw.ImageDraw, events: list[dict], today: date, x: int,
                    top: int, bottom: int, title_right: int, X, Y, avoid=None) -> int:
-    """The week, one block per day: date and weekday in a left column, then
-    a line per event — time (bold, its own column; ALL DAY in small caps;
-    blank when untimed), owner tag, title. Titles may run on past the
-    column (over the art) up to `title_right`, or stop short of the `avoid`
+    """The week, one block per day: date and weekday in a left column, the
+    date's top level with the cap height of the day's first line, then a
+    line per event — time (its own column; ALL DAY in small caps; blank
+    when untimed), owner tag, title. Days before today are drawn faded;
+    today and later at full strength. Titles may run on past the column
+    (over the art) up to `title_right`, or stop short of the `avoid`
     rectangle on the lines beside it. A block is never shorter than its
     date column. Days are squeezed to fewer lines each until the week fits
     above `bottom`. Returns its bottom."""
     f_num = _font(Y(42), bold=True)
-    f_wd = _font(Y(17), bold=True)
-    f_time = _font(Y(26), bold=True)
-    f_allday = _font(Y(19), bold=True)
-    f_tag = _font(Y(20), bold=True)
+    f_wd = _font(Y(17))
+    f_time = _font(Y(26))
+    f_allday = _font(Y(19))
+    f_tag = _font(Y(20))
     f_title = _font(Y(26))
     halo = dict(stroke_width=max(1, Y(3)), stroke_fill=WHITE)
     week = _week(today)
     by_day = {dy.isoformat(): [e for e in events if e.get("date") == dy.isoformat()]
               for dy in week}
     pad, gap, row = Y(6), Y(10), Y(DAILY_EVENT_ROW_H)
-    wd_y = Y(46)                     # the weekday label, below the date number
-    date_col = wd_y + d.textbbox((0, 0), "MTWFS", font=f_wd)[3]
+    # Where a line's capitals start, below the top of its row: the date
+    # number's top sits there too, whether or not the day has a line.
+    cap_top = d.textbbox((0, row // 2), "H", font=f_title, anchor="lm")[1]
+    wd_y = Y(40)                     # the weekday label, below the date's top
+    date_col = cap_top + wd_y + d.textbbox((0, 0), "MTWFS", font=f_wd)[3]
 
     def heights(cap):
         return [2 * pad + max(date_col, row * len(_day_lines(by_day[dy.isoformat()], cap)))
@@ -1521,30 +1532,31 @@ def _draw_calendar(d: ImageDraw.ImageDraw, events: list[dict], today: date, x: i
     title_x = tag_x + tag_w + X(12)
     y = top
     for dy, h in zip(week, heights(cap)):
-        if dy == today:
-            d.rectangle([x - X(22), y, x - X(8), y + h - 1], fill=YELLOW)
+        past = dy < today
+        ink = DAILY_FADED if past else BLACK
         num = str(dy.day)
-        d.text((x, y + pad - d.textbbox((0, 0), num, font=f_num)[1]), num,
-               font=f_num, fill=BLACK)
-        _spaced(d, x + X(1), y + pad + wd_y, dy.strftime("%a").upper(), f_wd, X(2), BLACK)
+        num_top = y + pad + cap_top
+        d.text((x, num_top - d.textbbox((0, 0), num, font=f_num)[1]), num, font=f_num, fill=ink)
+        _spaced(d, x + X(1), num_top + wd_y, dy.strftime("%a").upper(), f_wd, X(2), ink)
         ly = y + pad
         for ev in _day_lines(by_day[dy.isoformat()], cap):
             mid = ly + row // 2
             if isinstance(ev, str):        # "+N more"
-                d.text((title_x, mid), ev, font=f_title, fill=BLACK, anchor="lm")
+                d.text((title_x, mid), ev, font=f_title, fill=ink, anchor="lm")
                 ly += row
                 continue
             if ev.get("all_day"):
                 _spaced(d, time_x, mid - f_allday.size // 2 - Y(1), "ALL DAY",
-                        f_allday, X(1), BLACK)
+                        f_allday, X(1), ink)
             elif ev.get("time"):
-                d.text((time_x, mid), ev["time"], font=f_time, fill=BLACK, anchor="lm")
-            _owner_tag(d, tag_x, mid - tag_h // 2, tag_w, tag_h, ev.get("owner"), f_tag)
+                d.text((time_x, mid), ev["time"], font=f_time, fill=ink, anchor="lm")
+            _owner_tag(d, tag_x, mid - tag_h // 2, tag_w, tag_h, ev.get("owner"), f_tag,
+                       outline=max(1, X(3)), faded=past)
             right = title_right
             if avoid and ly < avoid[3] and ly + row > avoid[1]:
                 right = min(right, avoid[0] - X(16))
             title = _fit(d, ev.get("title") or "", f_title, right - title_x)
-            d.text((title_x, mid), title, font=f_title, fill=BLACK, anchor="lm", **halo)
+            d.text((title_x, mid), title, font=f_title, fill=ink, anchor="lm", **halo)
             ly += row
         y += h + gap
     return y - gap
@@ -1552,21 +1564,21 @@ def _draw_calendar(d: ImageDraw.ImageDraw, events: list[dict], today: date, x: i
 
 def _draw_todos(d: ImageDraw.ImageDraw, todos: dict, x: int, top: int, width: int,
                 bottom: int, X, Y) -> None:
-    """One list, every row the same: tag, text, a rule under it. Open items
-    first, then done ones with an outlined tag, the text and its date
-    struck through. Rows that don't fit above `bottom` are dropped from the
-    end (done first)."""
-    f_tag = _font(Y(26), bold=True)
+    """One list, every row the same height: tag, text. Open items first,
+    then done ones drawn faded, the text and its date struck through. Rows
+    that don't fit above `bottom` are dropped from the end (done first)."""
+    f_tag = _font(Y(24))
     f_txt = _font(Y(28))
     row = Y(DAILY_TODO_ROW_H)
     rows = _todo_rows(todos)[:max(0, (bottom - top) // row)]
     tag_w, tag_h = X(64), Y(42)
-    rule = max(1, Y(2))
+    strike = max(1, Y(2))
     for i, (t, done) in enumerate(rows):
         y0 = top + i * row
-        mid = y0 + (row - rule) // 2
-        _owner_tag(d, x, mid - tag_h // 2, tag_w, tag_h, t.get("owner"), f_tag, done=done,
-                   outline=max(1, X(4)))
+        mid = y0 + row // 2
+        ink = DAILY_FADED if done else BLACK
+        _owner_tag(d, x, mid - tag_h // 2, tag_w, tag_h, t.get("owner"), f_tag,
+                   outline=max(1, X(4)), faded=done)
         tx = x + tag_w + X(16)
         right = x + width
         when = ""
@@ -1578,14 +1590,13 @@ def _draw_todos(d: ImageDraw.ImageDraw, todos: dict, x: int, top: int, width: in
                 log.warning("daily: done item with a bad date %r", t["date"])
         ww = int(d.textlength(when, font=f_txt)) if when else 0
         text = _fit(d, t.get("title") or "", f_txt, right - tx - (ww + X(16) if ww else 0))
-        d.text((tx, mid), text, font=f_txt, fill=BLACK, anchor="lm")
+        d.text((tx, mid), text, font=f_txt, fill=ink, anchor="lm")
         if when:
-            d.text((right, mid), when, font=f_txt, fill=BLACK, anchor="rm")
+            d.text((right, mid), when, font=f_txt, fill=ink, anchor="rm")
         if done:
-            d.line([(tx, mid), (tx + d.textlength(text, font=f_txt), mid)], fill=BLACK, width=rule)
+            d.line([(tx, mid), (tx + d.textlength(text, font=f_txt), mid)], fill=ink, width=strike)
             if when:
-                d.line([(right - ww, mid), (right, mid)], fill=BLACK, width=rule)
-        d.rectangle([x, y0 + row - rule, right, y0 + row - 1], fill=BLACK)
+                d.line([(right - ww, mid), (right, mid)], fill=ink, width=strike)
 
 
 def _draw_daily_caption(img: Image.Image, animal: dict, art_rect, right: int, top: int,

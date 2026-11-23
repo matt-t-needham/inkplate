@@ -307,11 +307,22 @@ third with the list beside the calendar. The print has one art layout,
 daily screen is up, so Adjust and the review page place the right thing,
 previewed at the panel's current orientation.
 
-On the panel tints would dither to noise and text must stay solid, so
-everything is drawn in solid inks: **today** is a solid yellow bar down the
-left of its day block; a **done** item has an outlined (unfilled) tag in
-the owner's colour with a black letter, and its text and date are struck
-through. Owner tags always carry the letter, never colour alone.
+Calm over emphasis (2026-11-22): text is regular weight except the date
+numbers and the animal's name; the todo list has no rules between rows.
+Owner tags are outline-only boxes in the owner's colour (blue M, red K,
+yellow MK) with a black letter, always shown, never colour alone; yellow
+is too pale to hold a thin line by itself, so its box also gets a
+one-pixel black outer edge. Each date number's top is level with the cap
+height of its day's first line.
+
+**Today** is shown by fading what came before it: days before today are
+drawn in `DAILY_FADED`, a light grey (110), with tags at half line weight.
+It dithers to a stipple dense enough that the letterforms hold; lighter
+greys (130-150) broke strokes into dotted lines, darker (90) barely read
+as different. Today and later are full strength. The yellow bar this
+replaced read as loud. A **done** todo gets the same faded treatment plus
+a strike-through of its text and date, since outlined tags no longer mark
+it.
 
 **The calendar and list are example data.** The shared calendar feed and
 the planner service don't exist yet; `planner_stub.py` returns made-up
