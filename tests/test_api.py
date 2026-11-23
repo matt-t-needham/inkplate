@@ -317,7 +317,9 @@ def test_page_layers_compose_to_the_render_at_the_saved_placement(client, fake_d
     a drag would apply no longer does, so the comparison can tell."""
     import json
     _showing(fake_data)
-    for screen, layout in (("dashboard", "hero"), ("daily", "daily")):
+    # The daily view is placeable in landscape only (portrait shows it whole).
+    for screen, layout, rotation in (("dashboard", "hero", 90), ("daily", "daily", 0)):
+        client.post("/api/config", json={"rotation": rotation})
         client.post("/api/placement", json={"layout": layout, "x": 5, "y": -0.1,
                                             "scale": 1.3})
         r = client.get("/api/page-preview.png", params={"file": "File:Fox.tif", "screen": screen})
@@ -348,18 +350,27 @@ def test_page_layers_refuse_prints_outside_the_queue(client, fake_data):
                                                    "screen": "palette_test"}).status_code == 400
 
 
-def test_daily_screen_places_its_own_layout_in_the_panels_orientation(client, fake_data):
-    """With the daily screen up, dragging places prints in the daily
-    layout, at the panel's current orientation."""
+def test_daily_screen_places_its_own_layout_only_in_landscape(client, fake_data, monkeypatch):
+    """With the daily screen up in landscape, dragging places prints in the
+    daily layout. In portrait the print hangs whole as a polaroid: there is
+    no layout, nothing to drag, and a placement for "the panel's layout" is
+    refused rather than saved somewhere it doesn't show (DECISIONS §30)."""
     _showing(fake_data)
-    for rotation, size in ((90, (1200, 1600)), (0, (1600, 1200))):
-        client.post("/api/config", json={"screen": "daily", "rotation": rotation})
-        assert client.get("/api/state").json()["art_layout"] == {"key": "daily",
-                                                                 "name": "daily view"}
-        j, _, _ = _layers(client)
-        assert j["size"] == list(size)
-        box, _ = screens.art_box(*size, "daily", True)
-        assert j["box"] == list(box)
+    client.post("/api/config", json={"screen": "daily", "rotation": 0})
+    assert client.get("/api/state").json()["art_layout"] == {"key": "daily",
+                                                             "name": "daily view"}
+    j, _, _ = _layers(client)
+    assert j["size"] == [1600, 1200]
+    box, _ = screens.art_box(1600, 1200, "daily", True)
+    assert j["box"] == list(box)
+
+    client.post("/api/config", json={"rotation": 90})
+    assert client.get("/api/state").json()["art_layout"] is None
+    assert client.get("/api/page-layers", params={"file": "File:Fox.tif"}).status_code == 400
+    assert client.post("/api/placement", json={"x": 0.1}).status_code == 400
+    import datasources
+    monkeypatch.setattr(datasources, "upcoming_animals", lambda *a, **k: [])
+    assert client.get("/api/review").json()["layouts"]["daily"] is None
 
 
 def test_review_queue_opens_at_the_first_unreviewed_and_moving_on_keeps_placement(
@@ -399,11 +410,14 @@ def test_page_preview_is_the_whole_page_and_refuses_prints_outside_the_queue(cli
     import json
     _showing(fake_data)
     client.post("/api/config", json={"rotation": 90, "portrait_layout": "stack"})
-    for screen, layout in (("dashboard", "stack"), ("daily", "daily")):
+    for screen, layout in (("dashboard", "stack"), ("daily", None)):
         r = client.get("/api/page-preview.png", params={"file": "File:Fox.tif", "screen": screen})
         assert r.status_code == 200
         w, h = Image.open(io.BytesIO(r.content)).size
         assert abs(w / h - 1200 / 1600) < 0.01
+        if layout is None:   # the portrait daily view: shown whole, no box to drag in
+            assert "X-Layout" not in r.headers and "X-Art-Box" not in r.headers
+            continue
         assert r.headers["X-Layout"] == layout
         box, _ = screens.art_box(1200, 1600, layout, True)
         assert json.loads(r.headers["X-Art-Box"]) == pytest.approx(

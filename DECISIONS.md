@@ -189,6 +189,49 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 30. The portrait daily screen: a polaroid on twine (2026-11-23)
+The portrait daily view is relaid from a mockup Matt approved. Landscape
+is unchanged.
+
+- **The week fills the left half**, from the top margin to just above the
+  "Example data" footer, in larger type (date 56 px bold, time and title
+  28 px, 50 px lines, 50x34 tags; `CAL_TALL`, against the landscape's
+  `CAL_COMPACT`). Spare height is shared out as equal gaps between days.
+  Long titles wrap to two lines inside the column (the second cut with an
+  ellipsis) instead of running on over the print. Every §26 rule holds;
+  when the week can't fit, titles go back to one line first, then days are
+  squeezed to "+N more".
+- **The todo list sits at the bottom right**, hanging from the bottom
+  margin, same rows, tags and faded/struck done items as before.
+- **The caption** stays top right; nothing lies under it, so no
+  lightened patch.
+- **The print hangs between them as a polaroid on twine**, shown whole:
+  the plate as standardised (`_prep_plate`, after its per-image rotation),
+  cut to its subject with about `HERO_CONTEXT` of sheet around it, at its
+  own shape, with no crop and no zoom. A white card (2 px dark outline,
+  20 px sides, 34 px top, 80 px blank foot, soft shadow) tilted 1.5°
+  anticlockwise, centred at x 900. The photo is at most 500 px wide and
+  shrinks uniformly so the tilted card fits between 30 px under the
+  caption and y 1000 (and 30 px above the list). Punched holes near the
+  top and bottom edges take the twine: in from over the top border at
+  x 650, left of the right-aligned caption, curving into the top hole; out
+  of the bottom hole towards the list, faded out before the list's top. The
+  twine is drawn supersampled on its own layer and composited over the
+  card. A plate that can't be read draws no card and no twine (and no
+  caption), with a warning in the log; never a placeholder.
+
+**Placement no longer applies to the portrait daily view.** The polaroid
+shows the whole plate, so there is nothing to move or zoom. The `daily`
+art layout (§25, §29) now exists in landscape only: `panel_layout` returns
+None for the daily screen in portrait, the pane's preview and the review
+page show that page without dragging (`/api/state` `art_layout` and the
+review's `layouts.daily` are null), `/api/page-layers` refuses it (400),
+`/api/page-preview.png` leaves out `X-Layout` and `X-Art-Box`, and
+`/api/placement` without a layout refuses rather than saving one that
+doesn't show. Saved `daily` placements are kept: they still apply to the
+landscape daily view, and `/api/placement` with `layout: "daily"` still
+saves one. The dashboard layouts keep their drag.
+
 ## 29. Drag the print on the page itself (2026-11-22)
 "The adjustment options need to be a grab and drag option from the panel
 itself, not the sidepanel with delayed update." The pane's **Adjust** side
