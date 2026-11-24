@@ -977,3 +977,178 @@ def find_animal(file: str) -> dict | None:
         if d and d.get("file") == file and Path(d.get("path", "")).exists():
             return d
     return None
+
+
+# ── daily photo (Immich, DECISIONS §32) ───────────────────────────────────────
+# One photo a day from the household's Immich for the portrait daily screen,
+# chosen once per local day (the container's TZ, DECISIONS §11) and kept in
+# DATA_DIR/cache/ so every render that day shows the same one.
+
+PHOTO_CACHE = "photo.json"
+PHOTO_BATCH = 50     # assets per /search/random call
+PHOTO_TRIES = 5      # previews tried before the pick counts as failed
+_photo_lock = threading.Lock()
+_photo_off_warned = False
+
+
+def _immich_post(path: str, body: dict, timeout: float = 20.0):
+    headers = {"User-Agent": _UA, "x-api-key": config.IMMICH_FRAME_API_KEY}
+    with httpx.Client(timeout=timeout, headers=headers) as c:
+        r = c.post(config.IMMICH_URL + path, json=body)
+        r.raise_for_status()
+        return r.json()
+
+
+def _immich_bytes(path: str, params: dict | None = None, timeout: float = 30.0) -> bytes:
+    headers = {"User-Agent": _UA, "x-api-key": config.IMMICH_FRAME_API_KEY}
+    with httpx.Client(timeout=timeout, headers=headers) as c:
+        r = c.get(config.IMMICH_URL + path, params=params)
+        r.raise_for_status()
+        return r.content
+
+
+def _photo_dir() -> Path:
+    d = _cache_dir() / "photo"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _months_before(day: date, months: int) -> date:
+    """`day` moved back by whole calendar months, clamped to the month's end
+    (31 May minus 3 months is 28 or 29 Feb)."""
+    y, m0 = divmod(day.year * 12 + day.month - 1 - months, 12)
+    first_next = date(y + (m0 == 11), (m0 + 1) % 12 + 1, 1)
+    return date(y, m0 + 1, min(day.day, (first_next - timedelta(days=1)).day))
+
+
+def _camera_photo(asset: dict) -> bool:
+    """The junk filter: a photo from a camera (screenshots and saved images
+    carry no camera make; a Screenshot_… file is one even if it does) that
+    Immich has made a preview for. An asset still waiting for its thumbnail
+    job has no thumbhash, and its preview 404s."""
+    exif = asset.get("exifInfo") or {}
+    name = str(asset.get("originalFileName") or "")
+    return bool(exif.get("make")) and not name.startswith("Screenshot") \
+        and bool(asset.get("thumbhash"))
+
+
+def photo_place(city, state, country) -> str | None:
+    """Where a photo was taken, as written on its polaroid: the city, then
+    the state if there is one and it differs from the city, else the
+    country. A missing part is dropped, never "Unknown"; None when there is
+    nothing to say."""
+    parts = [v.strip() if isinstance(v, str) else "" for v in (city, state, country)]
+    city, state, country = parts
+    second = state if state and state != city else country
+    return ", ".join(p for p in dict.fromkeys((city, second)) if p) or None
+
+
+def _taken(asset: dict) -> str | None:
+    """The local date the photo was taken (Immich's localDateTime is the
+    wall-clock time where it was taken, written with a Z), as an ISO date."""
+    try:
+        return date.fromisoformat(str(asset.get("localDateTime") or "")[:10]).isoformat()
+    except ValueError:
+        return None
+
+
+def _pick_photo(day: date) -> dict:
+    """Choose and download the day's photo. Raises when there is none to
+    show or Immich fails."""
+    from io import BytesIO
+    from PIL import Image, ImageOps
+    after = _months_before(day, config.PHOTO_WINDOW_MONTHS)
+    base = {"type": "IMAGE", "withExif": True, "size": PHOTO_BATCH}
+    found: list[dict] = []
+    for body in ({**base, "takenAfter": f"{after.isoformat()}T00:00:00.000Z"}, base):
+        found = [a for a in _immich_post("/search/random", body) if _camera_photo(a)]
+        if found:
+            break
+        if "takenAfter" in body:
+            log.info("no camera photos taken since %s; choosing from older ones", after)
+    if not found:
+        raise LookupError("no camera photos with a preview in Immich")
+    missing = []
+    for asset in found[:PHOTO_TRIES]:
+        try:
+            raw = _immich_bytes(f"/assets/{asset['id']}/thumbnail", {"size": "preview"})
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                raise
+            missing.append(asset["id"])    # its preview isn't made yet: try the next
+            continue
+        # Immich's previews are already upright with the EXIF tag stripped
+        # (checked against orientation 6 and 8 originals, 2026-11-23);
+        # exif_transpose only acts if a tag is ever present.
+        img = ImageOps.exif_transpose(Image.open(BytesIO(raw))).convert("RGB")
+        name = f"{asset['id']}.jpg"
+        tmp = _photo_dir() / f"{name}.tmp"
+        img.save(tmp, "JPEG", quality=92)
+        os.replace(tmp, _photo_dir() / name)
+        exif = asset.get("exifInfo") or {}
+        return {"id": asset["id"], "file": name, "for_date": day.isoformat(),
+                "taken": _taken(asset),
+                "place": photo_place(exif.get("city"), exif.get("state"), exif.get("country")),
+                "city": exif.get("city"), "state": exif.get("state"),
+                "country": exif.get("country"), "width": img.width, "height": img.height}
+    raise LookupError(f"no preview for {len(missing)} candidate photos (404)")
+
+
+def _with_path(pick: dict | None) -> dict | None:
+    """The stored pick with its preview's path, or None if the preview is gone."""
+    if not pick or not pick.get("file"):
+        return None
+    path = _photo_dir() / pick["file"]
+    return {**pick, "path": str(path)} if path.exists() else None
+
+
+def _prune_photos(keep: str) -> None:
+    """Keep the current preview and the newest others, up to PHOTO_KEEP."""
+    others = sorted((p for p in _photo_dir().glob("*.jpg") if p.name != keep),
+                    key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in others[max(0, config.PHOTO_KEEP - 1):]:
+        try:
+            p.unlink()
+        except OSError as e:
+            log.warning("could not prune photo preview %s: %s", p.name, e)
+
+
+def get_photo(day: date | None = None) -> dict | None:
+    """The day's photo: {id, path, for_date, taken (ISO date or None), place
+    (photo_place, or None), city, state, country, width, height}, or None
+    when there is none to show. Chosen once per local day; a later render
+    the same day reuses it without asking Immich. If choosing fails, the
+    last good pick is kept (even an earlier day's) and the next try waits
+    PHOTO_RETRY_S, so a failure is logged once per attempt rather than per
+    render. Never raises: the render goes on without a photo."""
+    global _photo_off_warned
+    if not config.IMMICH_FRAME_API_KEY:
+        if not _photo_off_warned:
+            log.warning("daily photo off: IMMICH_FRAME_API_KEY is not set")
+            _photo_off_warned = True
+        return None
+    day = day or date.today()
+    with _photo_lock:
+        cached = _cache_read(PHOTO_CACHE) or {}
+        last = _with_path(cached.get("pick"))
+        if last and last.get("for_date") == day.isoformat():
+            return last
+        tried = cached.get("tried") or {}
+        if tried.get("for") == day.isoformat() and time.time() - tried.get("at", 0) < config.PHOTO_RETRY_S:
+            return last
+        try:
+            pick = _pick_photo(day)
+        except Exception as e:
+            # Deliberately broad: whatever went wrong (Immich down, a bad
+            # response, a full disk), the panel keeps the last photo. Reported
+            # here, once per attempt.
+            kept = f"keeping the photo from {last['for_date']}" if last else "no photo to show"
+            log.warning("daily photo pick for %s failed (%s): %s: %s",
+                        day, kept, type(e).__name__, e)
+            _log_event(f"daily photo pick failed ({kept}): {type(e).__name__}: {e}")
+            _cache_write(PHOTO_CACHE, {**cached, "tried": {"for": day.isoformat(), "at": time.time()}})
+            return last
+        _cache_write(PHOTO_CACHE, {"pick": pick})
+        _prune_photos(keep=pick["file"])
+        log.info("photo for %s: asset %s", day, pick["id"])
+        return _with_path(pick)

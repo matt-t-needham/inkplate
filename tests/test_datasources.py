@@ -766,3 +766,99 @@ def test_magpie_jay_is_not_a_magpie(data_dir, no_network, monkeypatch):
     _serve(monkeypatch, _page("File:Columbia Magpie or Jay. Male.jpg", "https://t/j.jpg",
                               ImageDescription="Pica Bullockii. Audubon"))
     assert datasources.get_animal(day) is None
+
+
+# ── daily photo (Immich) ──────────────────────────────────────────────────────
+
+def _asset(i, make="samsung", name=None, thumbhash="x", taken="2026-08-19T15:15:39.000Z", **place):
+    return {"id": f"asset-{i}", "originalFileName": name or f"2026081{i}_1.heic",
+            "thumbhash": thumbhash, "localDateTime": taken,
+            "exifInfo": {"make": make, **place}}
+
+
+@pytest.fixture()
+def immich(data_dir, monkeypatch, no_network):
+    """A fake Immich: `results` is popped per /search/random call (a
+    callable result raises); every body asked for and every preview
+    fetched is recorded."""
+    monkeypatch.setattr(datasources.config, "IMMICH_FRAME_API_KEY", "test-key")
+    fake = {"results": [], "bodies": [], "previews": [], "missing": set()}
+
+    def post(path, body):
+        assert path == "/search/random"
+        fake["bodies"].append(body)
+        r = fake["results"].pop(0)
+        return r() if callable(r) else r
+
+    def get(path, params=None):
+        asset = path.split("/")[2]
+        fake["previews"].append(asset)
+        if asset in fake["missing"]:
+            import httpx
+            req = httpx.Request("GET", "http://immich/" + path)
+            raise httpx.HTTPStatusError("404", request=req, response=httpx.Response(404, request=req))
+        return PLATE
+    monkeypatch.setattr(datasources, "_immich_post", post)
+    monkeypatch.setattr(datasources, "_immich_bytes", get)
+    return fake
+
+
+def test_photo_window_is_the_last_18_months_then_any_older(immich):
+    """An empty 18-month window falls back to the search without a date."""
+    immich["results"] = [[], [_asset(1)]]
+    p = datasources.get_photo(date(2026, 11, 30))
+    assert p["id"] == "asset-1" and p["taken"] == "2026-08-19"
+    first, second = immich["bodies"]
+    assert first["takenAfter"].startswith("2025-05-30")    # 18 calendar months back
+    assert "takenAfter" not in second
+
+
+def test_photo_skips_screenshots_cameraless_and_previewless_assets(immich):
+    """Junk never hangs: a screenshot (even with a camera make), an asset
+    with no make, one with no preview yet; a preview that 404s moves on to
+    the next survivor."""
+    immich["results"] = [[_asset(1, name="Screenshot_20260801.png"), _asset(2, make=None),
+                          _asset(3, thumbhash=None), _asset(4), _asset(5)]]
+    immich["missing"] = {"asset-4"}
+    assert datasources.get_photo(date(2026, 11, 23))["id"] == "asset-5"
+    assert immich["previews"] == ["asset-4", "asset-5"]
+
+
+def test_photo_is_chosen_once_a_day(immich):
+    immich["results"] = [[_asset(1)], [_asset(2)]]
+    day = date(2026, 11, 23)
+    assert datasources.get_photo(day)["id"] == "asset-1"
+    assert datasources.get_photo(day)["id"] == "asset-1"
+    assert len(immich["bodies"]) == 1                       # the second render didn't ask
+    assert datasources.get_photo(day + timedelta(days=1))["id"] == "asset-2"
+
+
+def test_photo_failure_keeps_the_last_pick_and_waits_to_retry(immich, caplog, monkeypatch):
+    """Immich down: the last good photo stays up, the failure is warned
+    once per attempt (not per render), and the next attempt waits
+    PHOTO_RETRY_S."""
+    def down():
+        raise ConnectionError("immich unreachable")
+    immich["results"] = [[_asset(1)], down, [_asset(2)]]
+    day = date(2026, 11, 23)
+    datasources.get_photo(day)
+    clock = [time.time()]
+    monkeypatch.setattr(datasources.time, "time", lambda: clock[0])
+    with caplog.at_level("WARNING", logger="inkplate.datasources"):
+        assert datasources.get_photo(day + timedelta(days=1))["id"] == "asset-1"
+        assert datasources.get_photo(day + timedelta(days=1))["id"] == "asset-1"
+    assert len(immich["bodies"]) == 2
+    assert len([r for r in caplog.records if r.levelname == "WARNING"]) == 1
+    clock[0] += datasources.config.PHOTO_RETRY_S
+    assert datasources.get_photo(day + timedelta(days=1))["id"] == "asset-2"
+
+
+@pytest.mark.parametrize("city, state, country, expected", [
+    ("Portland", "Oregon", "United States of America", "Portland, Oregon"),
+    ("Singapore", "Singapore", "Singapore", "Singapore"),            # state = city: the country, deduped
+    ("Paris", None, "France", "Paris, France"),                      # no state: the country
+    (None, "Oregon", "United States of America", "Oregon"),          # no city: dropped
+    ("", " ", None, None),                                           # nothing: no clause, never "Unknown"
+])
+def test_photo_place(city, state, country, expected):
+    assert datasources.photo_place(city, state, country) == expected
