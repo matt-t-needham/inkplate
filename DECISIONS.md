@@ -216,10 +216,13 @@ The planner service now exists and writes `inkplate.json` (schema_version
 - **`bingo` screen.** The card the planner's `bingo_card` names, in the
   daily screen's manner: Michroma at regular weight, the card's title and
   its owner's outline tag, "n / 16" at the right, a 4x4 hairline grid
-  filling the page, each summary centred at the largest size (46 down to
-  20 px) at which it wraps into its cell in three lines or fewer. A done
-  square gets a dobber: a disc of red 2x2 dots on a 3 px grid (about a
-  fifth ink) with a solid 6 px rim, the summary over it with a white halo.
+  filling the page, each summary (one or two words, the planner's rule)
+  centred at the largest size (46 down to 20 px) at which it wraps into
+  its cell, 24 px in from the rules, in three lines or fewer. A done
+  square gets a dobber: a disc (radius 0.44 of the cell's shorter side) of
+  red 2x2 dots on a 3 px grid (about a fifth ink) with a solid 6 px rim,
+  and its summary block is kept inside the disc (corners within 0.85r; two words take a line each), wrapping
+  and shrinking rather than running over the rim, with a white halo.
   Half coverage read as a filled disc and crowded the text; an eighth read
   as pink, not ink. The disc is the signal; red is just its ink.
 - **No special dither.** The stipple is drawn in pure ink, so

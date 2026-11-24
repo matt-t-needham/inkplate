@@ -2019,9 +2019,12 @@ def _draw_twine(img: Image.Image, hole_top, hole_bottom, card_bottom: int,
 BINGO_INK = RED
 BINGO_RULE = 2             # the grid's hairlines, layout px
 BINGO_HEADER_H = 96        # title row, above the rule under it
-BINGO_PAD = 18             # inside a cell, around its summary
+BINGO_PAD = 24             # inside a cell, around its summary
 BINGO_TEXT = (46, 20)      # a summary's largest and smallest type
-BINGO_DOBBER_R = 0.40      # the disc's radius, as a share of the cell's shorter side
+BINGO_DOBBER_R = 0.44      # the disc's radius, as a share of the cell's shorter side
+# A done square's summary stays inside its disc: its block's corners lie
+# within this share of the radius (clear of the rim and the halo).
+BINGO_IN_DISC = 0.85
 BINGO_RIM = 6
 # The stipple: 2x2 dots of ink on a 3 px grid, every other dot row offset,
 # about a fifth of the disc. Pure ink, so Floyd-Steinberg leaves it as drawn
@@ -2057,16 +2060,30 @@ def _dobber(img: Image.Image, stipple: Image.Image, cx: float, cy: float, r: flo
                                 width=rim)
 
 
-def _fit_summary(d: ImageDraw.ImageDraw, text: str, max_w: int, max_h: int, Y):
-    """The largest Michroma size at which `text` wraps into the box, and its
-    lines (at most three). At the smallest size, lines are cut to fit."""
+def _fit_summary(d: ImageDraw.ImageDraw, text: str, max_w: int, max_h: int, Y,
+                 disc_r: float | None = None):
+    """The largest Michroma size at which `text` wraps into the box (and,
+    given `disc_r`, into a circle that radius: the wider the block is
+    allowed, the shorter it must be), and its lines (at most three). At the
+    smallest size, lines are cut to fit. In a disc a two-word summary takes
+    a line per word, which suits the round shape."""
     big, small = BINGO_TEXT
+    words = text.split()
     for size in range(Y(big), Y(small) - 1, -2):
         f = _font(size, style="display")
-        lines = _wrap(d, text, f, max_w)
-        if (len(lines) <= 3 and len(lines) * size * 1.35 <= max_h
-                and all(d.textlength(ln, font=f) <= max_w for ln in lines)):
-            return f, size, lines
+        for n in ((2, 3) if disc_r is not None and len(words) == 2 else (1, 2, 3)):
+            h = n * size * 1.35
+            w = max_w
+            if disc_r is not None:
+                half = (disc_r * BINGO_IN_DISC) ** 2 - (h / 2) ** 2
+                if half <= 0:
+                    break
+                w = min(w, int(2 * math.sqrt(half)))
+            lines = words if n == 2 and len(words) == 2 and disc_r is not None \
+                else _wrap(d, text, f, w)
+            if (len(lines) <= n and h <= max_h
+                    and all(d.textlength(ln, font=f) <= w for ln in lines)):
+                return f, size, lines
     f = _font(Y(small), style="display")
     return f, Y(small), [_fit(d, ln, f, max_w) for ln in _wrap(d, text, f, max_w)[:3]]
 
@@ -2117,8 +2134,10 @@ def _bingo(width: int, height: int, card: dict) -> Image.Image:
 
     pad = X(BINGO_PAD)
     for sq in squares:
-        f, size, lines = _fit_summary(d, sq["summary"], int(cw) - 2 * pad,
-                                      int(ch) - 2 * pad, Y)
+        # A done summary stays inside the dobber, wrapping and shrinking
+        # rather than running over the rim.
+        f, size, lines = _fit_summary(d, sq["summary"], int(cw) - 2 * pad, int(ch) - 2 * pad,
+                                      Y, disc_r=r if sq["done"] else None)
         cx, cy = gx0 + (sq["col"] + 0.5) * cw, gy0 + (sq["row"] + 0.5) * ch
         lh = size * 1.35
         halo = {"stroke_width": max(2, Y(4)), "stroke_fill": WHITE} if sq["done"] else {}
