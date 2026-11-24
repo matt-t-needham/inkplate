@@ -433,9 +433,10 @@ def panel_layout(cfg: dict, size: tuple[int, int]) -> str | None:
     """The art layout the panel draws at this frame size: the daily screen's
     own, else the dashboard's — landscape, or the configured portrait
     layout. None for the portrait daily screen, whose print is shown whole
-    and can't be placed."""
+    and can't be placed, and for bingo (no print); "planner" is resolved
+    first."""
     width, height = size
-    screen = resolve(cfg.get("screen"))
+    screen = drawn_screen(cfg.get("screen"))
     if screen == "daily":
         return DAILY_LAYOUT if width >= height else None
     if screen == "bingo":
@@ -1765,6 +1766,9 @@ def _daily(width: int, height: int, animal: dict | None, planner: dict, today: d
     return img, art
 
 
+STALE_ROW_H = 46   # the offline marker's row, above the footer line
+
+
 def _daily_footer(d: ImageDraw.ImageDraw, planner: dict, height: int, X, Y) -> int:
     """Bottom-left: "Example data" while the planner is the stub, "Example
     events" while only the calendar is, and above it the offline marker
@@ -1780,14 +1784,10 @@ def _daily_footer(d: ImageDraw.ImageDraw, planner: dict, height: int, X, Y) -> i
     return foot_top
 
 
-STALE_ROW_H = 46   # the offline marker's row, above the footer line
-
 
 def _stale_marker(d: ImageDraw.ImageDraw, x: int, top: int, text: str, X, Y) -> None:
     """An outlined warning triangle with "!" and the words beside it: the
-    planner export is old. A shape and words, never colour alone (Matt is
-    colourblind); `text` carries the export's own time, so the marker is
-    the same every render (no clock, DECISIONS §6)."""
+    planner export is old."""
     h = Y(34)
     w = round(h * 1.15)
     y0 = top + (Y(STALE_ROW_H) - h) // 2
@@ -2011,32 +2011,30 @@ def _draw_twine(img: Image.Image, hole_top, hole_bottom, card_bottom: int,
 
 # ── bingo ─────────────────────────────────────────────────────────────────────
 # One of the planner's 4x4 bingo cards, the one its `bingo_card` names
-# (DECISIONS §31). The daily screen's manner: Michroma at regular weight,
-# hairline rules, the owner's outline tag. A done square gets a "dobber": a
-# stippled disc with a solid rim in one ink, the summary still legible over
-# it. The disc is the done signal, a shape, never colour alone.
+# (DECISIONS §31). A done square gets a "dobber": a stippled disc with a
+# solid rim in one ink, the summary still legible over it.
 
 BINGO_INK = RED
 BINGO_RULE = 2             # the grid's hairlines, layout px
 BINGO_HEADER_H = 96        # title row, above the rule under it
 BINGO_PAD = 24             # inside a cell, around its summary
-BINGO_TEXT = (46, 20)      # a summary's largest and smallest type
+BINGO_TEXT_PX = (46, 20)   # a summary's largest and smallest type
+BINGO_LINE_H = 1.35        # a summary's line height, as a share of its type size
 BINGO_DOBBER_R = 0.44      # the disc's radius, as a share of the cell's shorter side
 # A done square's summary stays inside its disc: its block's corners lie
 # within this share of the radius (clear of the rim and the halo).
-BINGO_IN_DISC = 0.85
-BINGO_RIM = 6
-# The stipple: 2x2 dots of ink on a 3 px grid, every other dot row offset,
-# about a fifth of the disc. Pure ink, so Floyd-Steinberg leaves it as drawn
-# (no special dither needed). Half coverage read as a filled disc and
-# crowded the summaries; an eighth read as pale pink, not ink.
-BINGO_STIPPLE = 3
+BINGO_TEXT_IN_DISC = 0.85
+BINGO_RIM = 6              # layout px
+# The stipple: 2x2 dots of ink on a grid of this pitch (px), every other dot
+# row offset, about a fifth of the disc. Pure ink, so Floyd-Steinberg leaves
+# it as drawn (no special dither needed).
+BINGO_STIPPLE_PITCH = 3
 
 
 def _stipple(size: tuple[int, int]) -> Image.Image:
     """A frame-sized 'L' mask of the stipple dots (255 = ink), fixed to the
     frame's pixel grid so every disc shares one regular pattern."""
-    n = BINGO_STIPPLE
+    n = BINGO_STIPPLE_PITCH
     tile = Image.new("L", (2 * n, 2 * n), 0)
     td = ImageDraw.Draw(tile)
     td.rectangle([0, 0, 1, 1], fill=255)
@@ -2061,26 +2059,27 @@ def _dobber(img: Image.Image, stipple: Image.Image, cx: float, cy: float, r: flo
 
 
 def _fit_summary(d: ImageDraw.ImageDraw, text: str, max_w: int, max_h: int, Y,
-                 disc_r: float | None = None):
+                 disc_r: float | None = None) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont,
+                                                       int, list[str]]:
     """The largest Michroma size at which `text` wraps into the box (and,
     given `disc_r`, into a circle that radius: the wider the block is
     allowed, the shorter it must be), and its lines (at most three). At the
     smallest size, lines are cut to fit. In a disc a two-word summary takes
-    a line per word, which suits the round shape."""
-    big, small = BINGO_TEXT
+    a line per word."""
+    big, small = BINGO_TEXT_PX
     words = text.split()
+    one_per_line = disc_r is not None and len(words) == 2
     for size in range(Y(big), Y(small) - 1, -2):
         f = _font(size, style="display")
-        for n in ((2, 3) if disc_r is not None and len(words) == 2 else (1, 2, 3)):
-            h = n * size * 1.35
+        for n in ((2, 3) if one_per_line else (1, 2, 3)):
+            h = n * size * BINGO_LINE_H
             w = max_w
             if disc_r is not None:
-                half = (disc_r * BINGO_IN_DISC) ** 2 - (h / 2) ** 2
+                half = (disc_r * BINGO_TEXT_IN_DISC) ** 2 - (h / 2) ** 2
                 if half <= 0:
                     break
                 w = min(w, int(2 * math.sqrt(half)))
-            lines = words if n == 2 and len(words) == 2 and disc_r is not None \
-                else _wrap(d, text, f, w)
+            lines = words if one_per_line and n == 2 else _wrap(d, text, f, w)
             if (len(lines) <= n and h <= max_h
                     and all(d.textlength(ln, font=f) <= w for ln in lines)):
                 return f, size, lines
@@ -2134,12 +2133,10 @@ def _bingo(width: int, height: int, card: dict) -> Image.Image:
 
     pad = X(BINGO_PAD)
     for sq in squares:
-        # A done summary stays inside the dobber, wrapping and shrinking
-        # rather than running over the rim.
         f, size, lines = _fit_summary(d, sq["summary"], int(cw) - 2 * pad, int(ch) - 2 * pad,
                                       Y, disc_r=r if sq["done"] else None)
         cx, cy = gx0 + (sq["col"] + 0.5) * cw, gy0 + (sq["row"] + 0.5) * ch
-        lh = size * 1.35
+        lh = size * BINGO_LINE_H
         halo = {"stroke_width": max(2, Y(4)), "stroke_fill": WHITE} if sq["done"] else {}
         for i, ln in enumerate(lines):
             d.text((cx, cy + (i - (len(lines) - 1) / 2) * lh), ln, font=f, fill=BLACK,
@@ -2149,17 +2146,16 @@ def _bingo(width: int, height: int, card: dict) -> Image.Image:
 
 # ── planner ───────────────────────────────────────────────────────────────────
 # The pane's "Planner" choice: whichever planner screen the export's `view`
-# asks for (daily without one). The renderer resolves it before drawing and
-# records what it drew, so a flip of the view is a stale frame (DECISIONS §31).
+# asks for (daily without one).
 
-def resolve(screen: str | None) -> str | None:
+def drawn_screen(screen: str | None) -> str | None:
     """The screen actually drawn for a configured one: "planner" becomes the
     export's view, anything else is itself."""
     return planner_source.view() if screen == "planner" else screen
 
 
 def planner(width: int, height: int) -> Image.Image:
-    return SCREENS[resolve("planner")](width, height)
+    return SCREENS[drawn_screen("planner")](width, height)
 
 
 def placeholder(width: int, height: int) -> Image.Image:

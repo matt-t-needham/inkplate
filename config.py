@@ -61,9 +61,8 @@ CONTACT = os.environ.get("INKPLATE_CONTACT", "https://github.com/matt-t-needham/
 ANIMAL_IMG_WIDTH = int(os.environ.get("INKPLATE_ANIMAL_IMG_WIDTH", "1000"))
 
 # ── Planner ───────────────────────────────────────────────────────────────────
-# The planner service's export (inkplate.json, schema_version 1), written
-# atomically by that service and mounted read-only here. Unset: the planner
-# screens draw planner_stub's example data. See planner_source.py.
+# The planner service's export (inkplate.json, schema_version 1). Unset:
+# the planner screens draw planner_stub's example data. See planner_source.py.
 PLANNER_EXPORT = (Path(os.environ["INKPLATE_PLANNER_EXPORT"])
                   if os.environ.get("INKPLATE_PLANNER_EXPORT") else None)
 # The planner rewrites the export hourly; older than this and the planner

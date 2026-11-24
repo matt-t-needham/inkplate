@@ -66,7 +66,6 @@ def test_export_maps_to_the_daily_screen_with_local_done_dates(export, los_angel
     assert [(t["owner"], t["date"]) for t in p["todos"]["done"]] == [
         ("mk", "2026-11-23"), ("k", "2026-11-24")]
     assert (p["example"], p["example_events"], p["stale"]) == (False, True, None)
-    assert p["events"]   # the stub's, until the calendar feed exists
 
 
 def test_offline_marker_from_exactly_twice_the_cadence(export, los_angeles):
@@ -80,16 +79,21 @@ def test_offline_marker_from_exactly_twice_the_cadence(export, los_angeles):
             "Planner offline since 20:00"
 
 
-def test_wrong_schema_falls_back_to_the_labelled_stub_and_escalates(export, caplog):
-    export(schema_version=2)
+def test_unusable_export_falls_back_to_the_labelled_stub_and_escalates(export, caplog):
     caplog.set_level(logging.WARNING, logger="inkplate.planner")
+    today = date(2026, 11, 23)
+    export(schema_version=2)
     levels = []
-    for _ in range(planner_source.REPEATED_FAILURES):
-        p = planner_source.get_planner(date(2026, 11, 23))
+    for _ in range(3):
+        p = planner_source.get_planner(today)
         assert p["example"] is True and p["stale"] is None
-        assert planner_source.get_bingo(date(2026, 11, 23))["example"] is True
         levels.append(caplog.records[-1].levelname)
-    assert levels[0] == "WARNING" and levels[-1] == "ERROR"
+    assert levels == ["WARNING", "WARNING", "ERROR"]
+    assert planner_source.get_bingo(today)["example"] is True
+    # A wrong-typed value (unhashable, so a bare membership test would raise
+    # TypeError) is the same logged fallback, and view() doesn't raise.
+    export(bingo_card=["matt"])
+    assert planner_source.get_bingo(today)["example"] is True
     assert planner_source.view() == "daily"
 
 

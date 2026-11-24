@@ -191,55 +191,39 @@ English tokens (Buffon's beaver-gland diagrams, no thank you).
 
 ## 31. Real planner data, a bingo screen, and a Planner choice (2026-11-23)
 The planner service now exists and writes `inkplate.json` (schema_version
-1) atomically, hourly and on every edit; the panel reads it read-only from
-`INKPLATE_PLANNER_EXPORT` (`planner_source.py`). Nothing reads its database.
+1); the panel reads it read-only (`planner_source.py`, which holds the
+mapping and validation rules) and never reads the planner's database.
 
-- **Daily todos are real.** The list's open rows are the export's
-  `next_up` (one per owner, M, K, MK; a null owner is skipped), its done
-  rows the `completed` items (todos and bingo squares alike), dated by the
-  local day (§11) of `done_at`, so something ticked at 23:30 here is that
-  day, not tomorrow's UTC date. The calendar stays the stub's: the export's
-  `calendar` is empty until the calendar feed exists, and the footer says
-  "Example events" instead of "Example data".
-- **Strict schema, soft failure.** A missing, unreadable or non-matching
-  export (wrong `schema_version`, a card without one square per cell, a
-  `bingo_card` naming no card, an unknown owner...) draws the full stub
-  with "Example data", logs a WARNING, and an ERROR from the third render
-  in a row (§23's threshold; a run counter in memory). A render never fails
-  because of the planner. Log messages name the field, never todo text.
-- **Offline marker.** The planner rewrites hourly; an export older than
-  two hours (`PLANNER_STALE_S`, so one missed write is tolerated) is still
-  drawn, with "Planner offline since HH:MM" (a date too if it was not
-  today) above the footer, beside an outlined triangle with "!". A shape
-  and words, not colour. The time is the export's own `generated_at`, never
+- **Daily todos are real; events aren't yet.** Done items are dated by
+  their local day (§11), so something ticked at 23:30 here is that day,
+  not tomorrow's UTC date. The export's calendar is empty until the
+  calendar feed exists, so the events stay the stub's and the footer says
+  "Example events".
+- **Strict schema, soft failure.** Any export that doesn't match the
+  schema draws the whole stub with "Example data" and logs, escalating as
+  fetches do (§23). A wall that shows example data with a log line beats
+  a half-drawn page from a half-understood file, and a render never fails
+  because of the planner.
+- **Offline marker.** The planner rewrites hourly, so an export older than
+  `PLANNER_STALE_S` (twice that) still draws, but says "Planner offline
+  since HH:MM" beside an outlined triangle with "!": a shape and words,
+  never colour alone. The time is the export's own `generated_at`, never
   the render's, so the frame doesn't change render to render (§6).
 - **`bingo` screen.** The card the planner's `bingo_card` names, in the
-  daily screen's manner: Michroma at regular weight, the card's title and
-  its owner's outline tag, "n / 16" at the right, a 4x4 hairline grid
-  filling the page, each summary (one or two words, the planner's rule)
-  centred at the largest size (46 down to 20 px) at which it wraps into
-  its cell, 24 px in from the rules, in three lines or fewer. A done
-  square gets a dobber: a disc (radius 0.44 of the cell's shorter side) of
-  red 2x2 dots on a 3 px grid (about a fifth ink) with a solid 6 px rim,
-  and its summary block is kept inside the disc (corners within 0.85r; two words take a line each), wrapping
-  and shrinking rather than running over the rim, with a white halo.
-  Half coverage read as a filled disc and crowded the text; an eighth read
-  as pink, not ink. The disc is the signal; red is just its ink.
-- **No special dither.** The stipple is drawn in pure ink, so
-  Floyd-Steinberg reproduces it exactly. Rendered both ways, nearest-colour
-  mapping differed only by ~90 stray pixels per done cell around
-  anti-aliased letters, invisible at panel scale, so the shared dither path
-  is unchanged and has no per-screen option.
+  daily screen's manner (Michroma, regular weight, hairline grid, the
+  owner's outline tag, "n / 16"). A done square gets a dobber, a stippled
+  disc with a solid rim: the disc is the signal, red only its ink. Done
+  summaries stay inside the disc, a two-word one a word per line, and
+  every summary keeps clear of the rules. Sizes are the `BINGO_*`
+  constants. Denser stipple read as a filled disc and crowded the text;
+  sparser read as pink. Rendering undithered (nearest colour) was tried
+  and rejected: the stipple is pure ink, so Floyd-Steinberg keeps it.
 - **The pane's third choice, Planner,** draws whichever screen the
-  export's `view` asks for (daily without an export). `screens.resolve`
-  turns "planner" into that screen; the renderer records it as `drawn` in
-  `meta.json` and `ensure_fresh` treats a change of it like a screen
-  change, so a flip is picked up at the device's next wake rather than the
-  next slot (and the content hash still decides whether the device
-  redraws). Dashboard and Daily are unchanged; Daily now shows the real
-  todos too. Previews and dragging treat "planner" as what it resolves to
-  (bingo has no print). The bingo screen can also be picked directly from
-  the pane's Pattern list. The default screen is still the dashboard.
+  export's `view` asks for (daily without an export).
+  `screens.drawn_screen` resolves it; the renderer records the result as
+  `drawn` in `meta.json`, and `ensure_fresh` treats a change of it like a
+  screen change, so a flip shows at the device's next wake, not the next
+  slot. Daily now shows the real todos too. Dashboard is unchanged.
 
 ## 30. The portrait daily screen: a polaroid on twine (2026-11-23)
 The portrait daily view is relaid from a mockup Matt approved. Landscape

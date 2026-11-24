@@ -64,8 +64,8 @@ def get_planner(today: date) -> dict:
 
 
 # A made-up bingo card for the bingo screen: 16 squares in reading order,
-# one or two words each (the planner refuses more),
-# "x" = done (a full second row among them, so a line shows).
+# one or two words each (the planner refuses more), "x" = done (a full
+# second row among them, so a line shows).
 _BINGO = [
     ("Run 10k", ""), ("Bake bread", "x"), ("Sea swim", ""), ("Ukulele", ""),
     ("Fix bike", "x"), ("Plant bulbs", "x"), ("Museum day", "x"), ("Camp out", "x"),

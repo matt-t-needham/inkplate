@@ -70,9 +70,8 @@ def render(force_new_version: bool = False) -> dict:
     rotation = cfg["rotation"]
     t0 = time.monotonic()
 
-    # "planner" draws whichever planner screen the export asks for; meta
-    # records what was drawn so ensure_fresh sees the view flip.
-    drawn = screens.resolve(screen_name)
+    # meta records what was drawn so ensure_fresh sees the view flip.
+    drawn = screens.drawn_screen(screen_name)
     img = screens.SCREENS[drawn](*upright_size(rotation))
     dithered = palette.dither_to_spectra(img)
     panel = palette.simulate_panel(dithered)
@@ -149,18 +148,23 @@ def sleep_seconds(cfg: dict, now: float | None = None) -> int:
 def ensure_fresh() -> dict:
     """Render if there is no cached frame, the screen changed (including the
     planner export flipping the "planner" screen's view), or the cache
-    predates the current wake slot. Returns current meta."""
-    cfg = state.load_config()
-    m = meta()
-    slot_start, _ = schedule(cfg)
-    stale = (
-        m is None
-        or m.get("screen") != cfg["screen"]
-        or m.get("drawn", m.get("screen")) != screens.resolve(cfg["screen"])
-        or m.get("rotation", 0) != cfg["rotation"]
-        or m.get("rendered_at", 0) < slot_start - config.WAKE_GRACE_S
-        or not dithered_path().exists()
-    )
+    predates the current wake slot. Returns current meta. Every failure is
+    logged here before it is raised (callers rely on that)."""
+    try:
+        cfg = state.load_config()
+        m = meta()
+        slot_start, _ = schedule(cfg)
+        stale = (
+            m is None
+            or m.get("screen") != cfg["screen"]
+            or m.get("drawn", m.get("screen")) != screens.drawn_screen(cfg["screen"])
+            or m.get("rotation", 0) != cfg["rotation"]
+            or m.get("rendered_at", 0) < slot_start - config.WAKE_GRACE_S
+            or not dithered_path().exists()
+        )
+    except Exception as e:
+        log.error("freshness check failed: %s", e, exc_info=True)
+        raise
     if stale:
         try:
             return render()
