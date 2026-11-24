@@ -346,9 +346,10 @@ def _fetch_upcoming_in_background(args: tuple) -> None:
 
 
 def _print_screen(cfg: dict) -> str:
-    """The print screen the panel shows, or the dashboard while it shows a
-    test pattern."""
-    return cfg["screen"] if cfg["screen"] in screens.PRINT_SCREENS else "dashboard"
+    """The print screen the panel shows ("planner" resolved to what it
+    draws), or the dashboard while it shows a test pattern or the bingo card."""
+    screen = screens.resolve(cfg["screen"])
+    return screen if screen in screens.PRINT_SCREENS else "dashboard"
 
 
 @app.get("/api/review")
@@ -415,7 +416,7 @@ def _preview_screen(screen: str | None, cfg: dict) -> tuple[str, tuple[int, int]
     """A preview's screen (default: the panel's print screen; 400 unless it
     hangs a print), the panel's upright size and the art layout it uses
     (None: its print can't be placed)."""
-    screen = screen or _print_screen(cfg)
+    screen = screens.resolve(screen) if screen else _print_screen(cfg)
     if screen not in screens.PRINT_SCREENS:
         raise HTTPException(400, f"screen must be one of {', '.join(screens.PRINT_SCREENS)}")
     size = renderer.upright_size(cfg["rotation"])

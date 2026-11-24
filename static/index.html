@@ -115,6 +115,7 @@
   <div class="seg">
     <button type="button" data-screen="dashboard" aria-pressed="false">Dashboard</button>
     <button type="button" data-screen="daily" aria-pressed="false">Daily</button>
+    <button type="button" data-screen="planner" aria-pressed="false" title="Whatever the planner asks for: the daily screen or a bingo card">Planner</button>
   </div>
   <span class="msg" id="switch-msg"></span>
 </div>
@@ -180,7 +181,7 @@
 
     <div class="card">
       <h2>Test patterns</h2>
-      <div class="field"><label for="f-screen" title="Shows a test pattern instead of the Dashboard or Daily screen; applies at once.">Pattern</label><select id="f-screen"></select></div>
+      <div class="field"><label for="f-screen" title="Shows a test pattern (or the bingo card on its own) instead of the Dashboard, Daily or Planner screen; applies at once.">Pattern</label><select id="f-screen"></select></div>
     </div>
   </div>
 </main>
@@ -295,9 +296,9 @@ $('btn-save').addEventListener('click', async () => {
   setTimeout(() => { msg.textContent = ''; }, 3000);
 });
 
-// ── Screen: the switcher (Dashboard / Daily) and the test-pattern picker ──
+// ── Screen: the switcher (Dashboard / Daily / Planner) and the test-pattern picker ──
 // Both set the panel's screen through api/config, then re-render the preview.
-const MAIN_SCREENS = ['dashboard', 'daily'];
+const MAIN_SCREENS = ['dashboard', 'daily', 'planner'];
 async function setScreen(screen, msgEl) {
   document.querySelectorAll('.switcher button').forEach(b => { b.disabled = true; });
   try {
