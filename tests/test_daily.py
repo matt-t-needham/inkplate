@@ -130,40 +130,114 @@ def test_date_number_top_is_level_with_the_first_events_capitals():
     assert abs(numeral[0] - time_top) <= 1
 
 
-def test_polaroid_hangs_between_caption_and_list_and_draws_over_neither(monkeypatch, tmp_path):
-    """Portrait: whatever the plate's shape, the card sits below the caption
-    and above the todo list, and nothing of the card, its shadow or the
-    twine lands on the caption, the list or the calendar: the page drawn
-    with the polaroid differs from it drawn without only on paper."""
-    from PIL import Image, ImageChops, ImageDraw
-    planner = {"events": [{"date": "2026-11-16", "time": "09:00", "owner": "m",
-                           "title": "A long title that wraps onto a second line"}],
-               "todos": {"open": [{"owner": o, "title": "Something to do"}
-                                  for o in ("m", "k", "mk") * 2],
-                         "done": [{"owner": "m", "title": "Done", "date": "2026-11-15"}] * 3}}
-    real = screens._draw_polaroid
-    for name, size, ink in (("tall", (500, 1800), (180, 200, 320, 1600)),
-                            ("wide", (2400, 600), (150, 220, 2250, 420))):
-        sheet = Image.new("RGB", size, (238, 234, 224))
-        ImageDraw.Draw(sheet).rectangle(ink, fill=(30, 30, 30))
-        path = tmp_path / f"{name}.jpg"
-        sheet.save(path)
-        animal = {"path": str(path), "common_name": "fox", "sci_name": "Vulpes vulpes",
+def _sheet(tmp_path, name, size, ink, fill=(30, 30, 30), paper=(238, 234, 224)):
+    from PIL import Image, ImageDraw
+    sheet = Image.new("RGB", size, paper)
+    ImageDraw.Draw(sheet).rectangle(ink, fill=fill)
+    path = tmp_path / f"{name}.jpg"
+    sheet.save(path)
+    return str(path)
+
+
+POLAROID_PLANNER = {
+    "events": [{"date": "2026-11-16", "time": "09:00", "owner": "m",
+                "title": "A long title that wraps onto a second line"}],
+    "todos": {"open": [{"owner": o, "title": "Something to do"} for o in ("m", "k", "mk") * 2],
+              "done": [{"owner": "m", "title": "Done", "date": "2026-11-15"}] * 3}}
+
+
+def test_polaroids_hang_between_caption_and_list_and_draw_over_neither(monkeypatch, tmp_path):
+    """Portrait: whatever the print's and the photo's shapes, one card or
+    two, the cards sit below the caption and above the todo list, and
+    nothing of the cards, their shadows, writing or the twine lands on the
+    caption, the list or the calendar: the page drawn with the polaroids
+    differs from it drawn without only on paper. (Was the one-card test;
+    the day's photo now hangs under the print, DECISIONS §32.)"""
+    from PIL import ImageChops
+    plates = {"tall": _sheet(tmp_path, "tall", (500, 1800), (180, 200, 320, 1600)),
+              "wide": _sheet(tmp_path, "wide", (2400, 600), (150, 220, 2250, 420))}
+    photos = {None: None,
+              "tall": {"id": "a", "path": _sheet(tmp_path, "p-tall", (1440, 1920), (0, 0, 1440, 1920), (90, 120, 60)),
+                       "place": "Brooklyn Bridge, New York, United States", "taken": "2026-08-19"},
+              "wide": {"id": "b", "path": _sheet(tmp_path, "p-wide", (2560, 1440), (0, 0, 2560, 1440), (90, 120, 60)),
+                       "place": None, "taken": "2026-08-19"}}
+    real = screens._draw_polaroids
+    for plate, path in plates.items():
+        animal = {"path": path, "common_name": "fox", "sci_name": "Vulpes vulpes",
                   "native": "the Northern Hemisphere", "year": "1864", "place": "Amsterdam"}
-        monkeypatch.setattr(screens, "_draw_polaroid", real)
-        img, art = screens._daily(1200, 1600, animal, planner, date(2026, 11, 16))
-        monkeypatch.setattr(screens, "_draw_polaroid", lambda *a: (0, 0, 0, 0))
-        bare, _ = screens._daily(1200, 1600, animal, planner, date(2026, 11, 16))
+        for shot, photo in photos.items():
+            case = (plate, shot)
+            monkeypatch.setattr(screens, "_draw_polaroids", real)
+            img, art = screens._daily(1200, 1600, animal, POLAROID_PLANNER, date(2026, 11, 16), photo)
+            monkeypatch.setattr(screens, "_draw_polaroids", lambda *a: (0, 0, 0, 0))
+            bare, _ = screens._daily(1200, 1600, animal, POLAROID_PLANNER, date(2026, 11, 16), photo)
 
-        drawn = ImageChops.difference(img, bare).convert("L").point(lambda v: 255 if v else 0)
-        page_ink = bare.convert("L").point(lambda v: 255 if v < 255 else 0)
-        assert ImageChops.multiply(drawn, page_ink).getbbox() is None, name
-        assert drawn.getbbox()[0] >= screens.DAILY_CAL_RIGHT, name
+            drawn = ImageChops.difference(img, bare).convert("L").point(lambda v: 255 if v else 0)
+            page_ink = bare.convert("L").point(lambda v: 255 if v < 255 else 0)
+            assert ImageChops.multiply(drawn, page_ink).getbbox() is None, case
+            assert drawn.getbbox()[0] >= screens.DAILY_CAL_RIGHT, case
 
-        right_ink = page_ink.crop((600, 0, 1200, 1600))
-        caption_bottom = right_ink.crop((0, 0, 600, 600)).getbbox()[3]
-        list_top = 600 + right_ink.crop((0, 600, 600, 1600)).getbbox()[1]
-        x0, y0, x1, y1 = art.rect
-        assert caption_bottom < y0 and y1 < list_top and 600 < x0 and x1 <= 1200, (name, art.rect)
-        # Shown at a real size, limited by the photo's width or the room's height.
-        assert (x1 - x0 >= 500) if name == "wide" else (y1 - y0 >= 600), (name, art.rect)
+            right_ink = page_ink.crop((600, 0, 1200, 1600))
+            caption_bottom = right_ink.crop((0, 0, 600, 600)).getbbox()[3]
+            list_top = 600 + right_ink.crop((0, 600, 600, 1600)).getbbox()[1]
+            x0, y0, x1, y1 = art.rect
+            assert caption_bottom < y0 and y1 < list_top and 600 < x0 and x1 <= 1200, (case, art.rect)
+            if shot is None:
+                # Shown at a real size, limited by the photo's width or the room's height.
+                assert (x1 - x0 >= 500) if plate == "wide" else (y1 - y0 >= 600), (case, art.rect)
+
+
+def test_no_photo_hangs_the_print_alone_and_no_print_hangs_the_photo_alone(tmp_path):
+    """A photo that can't be read draws exactly the single-print page; with
+    no print the photo still hangs, alone."""
+    animal = {"path": _sheet(tmp_path, "plate", (2400, 600), (150, 220, 2250, 420)),
+              "common_name": "fox"}
+    photo = {"id": "a", "path": _sheet(tmp_path, "p", (1440, 1920), (0, 0, 1440, 1920), (90, 120, 60)),
+             "place": "Portland, Oregon", "taken": "2026-08-19"}
+    today = date(2026, 11, 16)
+    alone, _ = screens._daily(1200, 1600, animal, POLAROID_PLANNER, today, None)
+    gone = {**photo, "path": str(tmp_path / "gone.jpg")}
+    assert screens._daily(1200, 1600, animal, POLAROID_PLANNER, today, gone)[0].tobytes() == alone.tobytes()
+    img, art = screens._daily(1200, 1600, None, POLAROID_PLANNER, today, photo)
+    assert any(g > r + 30 for _, (r, g, b) in img.crop(art.rect).getcolors(1 << 20))
+
+
+def test_tucked_second_card_keeps_its_whole_photo_visible(monkeypatch, tmp_path):
+    """When the pair is too tall the second card tucks under the first,
+    which is drawn on top and may cover only its top border: the second
+    card's photo shows as much with the first card hung over it as
+    without, at both tilts."""
+    # Both cards at full width, where the opposite tilts reach furthest.
+    animal = {"path": _sheet(tmp_path, "plate", (2400, 600), (150, 220, 2250, 420)),
+              "common_name": "fox"}
+    red = _sheet(tmp_path, "red", (1440, 1920), (0, 0, 1440, 1920), (255, 0, 0), (255, 0, 0))
+    photo = {"id": "a", "path": red, "place": "Portland, Oregon", "taken": "2026-08-19"}
+    layouts, pair_layout = [], screens._pair_layout
+    monkeypatch.setattr(screens, "_pair_layout", lambda *a: layouts.append(pair_layout(*a)) or layouts[-1])
+
+    def red_shown(hang_first: bool) -> int:
+        hang, calls = screens._hang, []
+
+        def spy(img, card, *a):     # the second card is hung first, then the first over it
+            calls.append(card)
+            return hang(img, card, *a) if hang_first or len(calls) == 1 else (0, 0, 0, 0)
+        monkeypatch.setattr(screens, "_hang", spy)
+        img, _ = screens._daily(1200, 1600, animal, POLAROID_PLANNER, date(2026, 11, 16), photo)
+        monkeypatch.setattr(screens, "_hang", hang)
+        return sum(1 for r, g, b in img.getdata() if r > 150 and g < 60 and b < 60)
+
+    alone, under = red_shown(False), red_shown(True)
+    (_, joined), _ = layouts
+    assert not joined                                        # this pair has to tuck
+    assert alone - under < 40, (alone, under)                # antialiasing at most
+
+
+def test_long_place_shrinks_to_the_smallest_size_then_drops_its_region():
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    ident = lambda v: v
+    place = "Brooklyn Bridge, New York"
+    big, small = screens.POLAROID_HAND_SIZES
+    w = d.textlength(place, font=screens._hand(small, screens.POLAROID_HAND_PLACE_W))
+    assert screens._fit_place(d, place, w, 1, ident) == (place, small)
+    assert screens._fit_place(d, place, w - 1, 1, ident) == ("Brooklyn Bridge", big)

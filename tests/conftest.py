@@ -16,6 +16,13 @@ import pytest  # noqa: E402
 import config  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def no_immich_key(monkeypatch):
+    """The daily photo slot is off unless a test turns it on, so no render
+    asks a real Immich even when the shell has the key set."""
+    monkeypatch.setattr(config, "IMMICH_FRAME_API_KEY", "")
+
+
 @pytest.fixture()
 def data_dir(tmp_path, monkeypatch):
     """Fresh isolated DATA_DIR per test."""

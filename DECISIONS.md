@@ -189,6 +189,74 @@ the joke: "Rhinoceros · Rhinoceros indicus · of South Asia · as depicted by
 Conrad Gessner, Zürich, 1551". Anatomy-plate filter extended to French and
 English tokens (Buffon's beaver-gland diagrams, no thank you).
 
+## 32. A photo from Immich under the print (2026-11-23)
+The portrait daily view hangs a second polaroid on the same twine: one
+photo a day from the household's Immich, under the animal print, per the
+mockup Matt approved (two cards on one string). Landscape is unchanged.
+
+- **Source.** Immich's API (`IMMICH_URL`, default
+  `http://immich-server:2283/api`) with a read-only key
+  (`IMMICH_FRAME_API_KEY`, header `x-api-key`). The key lacks `user.read`,
+  so nothing calls `/users/me`. Without the key the photo slot is off, with
+  one warning per process.
+- **Choosing.** Once per local day (container TZ, §11): `POST
+  /search/random` for 50 images with EXIF taken in the last 18 calendar
+  months (`takenAfter`). Checked live against Immich v3.4.2 on
+  2026-11-23: the endpoint exists and returns assets with `exifInfo`.
+  **Junk filter:** an asset needs a camera `make`, a file name not
+  starting `Screenshot`, and a `thumbhash`. Immich was still importing,
+  and 29 of 50 random assets had no thumbhash; each of those 404'd on its
+  preview. The first survivor is taken. If the window has none, the search
+  is repeated without a date, so older photos fill in. A preview that
+  still 404s moves on to the next survivor, up to 5.
+- **What is kept.** The pick (asset id, local date taken from
+  `localDateTime`, city/state/country, size) goes to `cache/photo.json`.
+  Its preview (`/assets/{id}/thumbnail?size=preview`, 1440 px on the short
+  side) goes to `cache/photo/<id>.jpg`. The newest 3 previews are kept.
+  Every render that day uses the stored pick, so the content hash stays
+  put all day. The pick is random, but it is chosen only once a day.
+- **Orientation.** Immich's previews are already upright with the EXIF tag
+  stripped. This was checked on orientation 6 and 8 originals: the preview
+  is portrait, matching the asset's width and height, which are already
+  turned. Immich's `exifImageWidth/Height` are the sensor's and are not.
+  `exif_transpose` is still applied, and does nothing without a tag.
+- **Failure.** If Immich is down or errors, or there is no photo at all,
+  the last good pick stays up, even one from an earlier day. A warning is
+  logged and a pane event added once per attempt, and the next attempt
+  waits `PHOTO_RETRY_S` (an hour) rather than retrying every render. With
+  no pick ever, the page is exactly the single-print page of §30. With no
+  print but a photo, the photo hangs alone.
+- **The foot says where and when**, in a marker hand: the place large
+  (36 px, shrinking to 28 to fit), with the date taken under it at 27 px,
+  "Portland, Oregon" / "19 Aug 2026". The place is the city, then the
+  state if there is one and it differs from the city, else the country. A
+  missing clause is dropped, never "Unknown", and the remaining one is
+  drawn alone at the larger size. A place too long at 28 px drops its
+  region ("Brooklyn Bridge, New York" becomes "Brooklyn Bridge"). The
+  photo card's foot is 108 px; the print's stays 80 px and blank.
+- **The pair** follows the mockup's `sizePair`. Both photos are as wide
+  as allowed (500 px) and stacked from 30 px under the caption to y 1000
+  (and 30 px above the list), leaving room for the tilted corners. If the
+  pair doesn't fit, the second card tucks up to 30 px under the first.
+  Then the taller photo is cut down to the other's height (a level cap),
+  then both shrink. The print is tilted −1.5° and the photo +1.8°, offset
+  6 px either side of x 900, or 22 px when tucked. The first card is drawn
+  over the second and may cover only its top border. Because the opposite
+  tilts bring the edges closer at one end, the tuck is cut back until the
+  first card's bottom edge clears the second's photo along their shared
+  width (about 18 px in practice, not the full 30). The twine runs from the
+  top border into the print's top hole, out of its bottom hole into the
+  photo's top hole (hidden when tucked), and out of the photo's bottom
+  hole, fading into the list. Knots sit at the visible holes. Nothing is
+  random, so the frame is stable all day.
+- **Font.** Caveat (SIL OFL 1.1, from google/fonts `ofl/caveat/`), vendored
+  as `fonts/Caveat-Variable.ttf` with `Caveat-OFL.txt`. Its named instances
+  are only Regular and Bold, so the weight is set on its axis: 600 for the
+  place and 500 for the date.
+- **Deployment** (bix-infra, not this repo): the inkplate container joins
+  the `immich-api` network and gets `IMMICH_URL` and `IMMICH_FRAME_API_KEY`
+  from `bix-infra/.env`.
+
 ## 31. Real planner data, a bingo screen, and a Planner choice (2026-11-23)
 The planner service now exists and writes `inkplate.json` (schema_version
 1); the panel reads it read-only (`planner_source.py`, which holds the

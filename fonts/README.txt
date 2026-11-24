@@ -16,3 +16,11 @@ weathericons-regular-webfont.ttf
   Codepoints live in screens.WI_GLYPHS — they are Private Use Area chars, so
   reference them as chr(0xf00d) rather than pasting literals (literal PUA
   characters do not survive every editor/pipe).
+
+Caveat-Variable.ttf  (+ Caveat-OFL.txt)
+  Caveat — © 2014 The Caveat Project Authors. SIL Open Font License 1.1.
+  Fetched from https://github.com/google/fonts (ofl/caveat/Caveat[wght].ttf,
+  renamed). A variable font with one weight axis (400-700); its only named
+  instances are Regular and Bold, so screens._hand sets the weight by axis
+  (600 for the place, 500 for the date). The marker hand on the photo
+  polaroid's foot (DECISIONS §32).

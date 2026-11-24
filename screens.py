@@ -541,7 +541,8 @@ def _page(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int]):
     width, height = size
     if screen == "daily":
         today = date.today()
-        img, art = _daily(width, height, animal, planner_source.get_planner(today), today)
+        img, art = _daily(width, height, animal, planner_source.get_planner(today), today,
+                          _daily_photo(width, height))
         if panel_layout({"screen": screen}, size) is None:
             return img, art, None, None
         box, mode = art_box(width, height, DAILY_LAYOUT, False)
@@ -1448,6 +1449,22 @@ POLAROID_SHADOW = ((4, 6), 9, 0.20)  # offset, blur, opacity
 TWINE_OUTLINE, TWINE_CORE, TWINE_PLY = (90, 58, 29), (201, 159, 100), (134, 89, 45)
 TWINE_TOP_X = 650          # where the twine comes in over the top border
 TWINE_SS = 2               # supersampling for the card and the twine
+# The day's photo hangs on the same twine under the print (DECISIONS §32),
+# laid out as the agreed mockup's sizePair: the pair stacked from under the
+# caption, the second card tucking under the first before either shrinks.
+POLAROID_PHOTO_FOOT = 108            # the photo card's foot carries where and when
+POLAROID_PAIR_TILTS = (-1.5, 1.8)    # print, photo; degrees, clockwise positive
+POLAROID_PAIR_GAP = 24               # between the cards when there is room
+POLAROID_PAIR_SPREAD = (6, 22)       # each card's offset from POLAROID_CX: apart, tucked
+POLAROID_TUCK = 30                   # the second card may tuck this far under the first
+POLAROID_TUCK_CLEAR = 4              # ... but the first stays this far above its photo
+POLAROID_EDGE = 8                    # a card's turned corner stays this far inside the frame
+TWINE_PAIR_BOW = 8                   # the run between the two cards
+POLAROID_HAND_SIZES = (36, 28)       # the place: largest that fits, down to the smaller
+POLAROID_HAND_DATE = 27
+POLAROID_HAND_PLACE_W, POLAROID_HAND_DATE_W = 600, 500   # Caveat weights
+POLAROID_HAND_INK = (20, 20, 20)
+POLAROID_HAND_TURN = 1.0             # degrees anticlockwise, the writing on the foot
 
 
 def _daily_art_box(width: int, height: int):
@@ -1736,15 +1753,24 @@ def daily(width: int, height: int) -> Image.Image:
     import state
     cfg = state.load_config()
     today = date.today()
-    return _daily(width, height, _animal(cfg), planner_source.get_planner(today), today)[0]
+    return _daily(width, height, _animal(cfg), planner_source.get_planner(today), today,
+                  _daily_photo(width, height))[0]
 
 
-def _daily(width: int, height: int, animal: dict | None, planner: dict, today: date):
+def _daily_photo(width: int, height: int) -> dict | None:
+    """The day's Immich photo, for the portrait daily view only (landscape
+    has no room for it, so it doesn't ask)."""
+    return datasources.get_photo() if height > width else None
+
+
+def _daily(width: int, height: int, animal: dict | None, planner: dict, today: date,
+           photo: dict | None = None):
     """The daily view drawn from its data: (image, the Art drawn or None).
-    In portrait the Art is the polaroid card's rectangle, with no
-    placement or geometry: the print is shown whole and can't be moved."""
+    In portrait the Art is the rectangle around the polaroids, with no
+    placement or geometry: the print is shown whole and can't be moved.
+    `photo` (datasources.get_photo) hangs under the print in portrait only."""
     if height > width:
-        return _daily_portrait(width, height, animal, planner, today)
+        return _daily_portrait(width, height, animal, planner, today, photo)
     img = Image.new("RGB", (width, height), WHITE)
     X, Y = _scalers(width, height, LANDSCAPE)
     box = _daily_art_box(width, height)
@@ -1798,10 +1824,12 @@ def _stale_marker(d: ImageDraw.ImageDraw, x: int, top: int, text: str, X, Y) -> 
 
 
 def _daily_portrait(width: int, height: int, animal: dict | None, planner: dict,
-                    today: date):
+                    today: date, photo: dict | None = None):
     """Portrait daily view: the week down the whole left half, the todo
-    list at the bottom right, the caption top right and the print between
-    them as a polaroid on twine (DECISIONS §30)."""
+    list at the bottom right, the caption top right and, between them on
+    one twine, the print as a polaroid and under it the day's photo
+    (DECISIONS §30, §32). Either card hangs alone when the other is
+    missing."""
     img = Image.new("RGB", (width, height), WHITE)
     X, Y = _scalers(width, height, PORTRAIT)
     d = ImageDraw.Draw(img)
@@ -1814,13 +1842,22 @@ def _daily_portrait(width: int, height: int, animal: dict | None, planner: dict,
     list_top = list_bottom - len(_todo_rows(todos)) * Y(DAILY_TODO_ROW_H)
     _draw_todos(d, todos, X(DAILY_TODO_X), list_top, X(DAILY_TODO_RIGHT - DAILY_TODO_X),
                 list_bottom, X, Y)
-    photo = _polaroid_photo(animal)
-    if photo is None:
+    cards = []
+    top = Y(DAILY_MARGIN)
+    plate = _polaroid_photo(animal)
+    if plate is not None:
+        caption = _draw_daily_caption(img, animal, None, width - X(DAILY_MARGIN),
+                                      Y(DAILY_MARGIN), X, Y)
+        top = caption[3] + Y(POLAROID_CLEAR)
+        cards.append(_Card(plate, POLAROID_FOOT))
+    snap = _immich_photo(photo)
+    if snap is not None:
+        cards.append(_Card(snap, POLAROID_PHOTO_FOOT,
+                           (photo.get("place"), _taken_text(photo.get("taken")))))
+    if not cards:
         return img, None
-    caption = _draw_daily_caption(img, animal, None, width - X(DAILY_MARGIN),
-                                  Y(DAILY_MARGIN), X, Y)
-    card = _draw_polaroid(img, photo, caption, list_top, X, Y)
-    return img, Art(card, None, None)
+    rect = _draw_polaroids(img, cards, top, list_top, X, Y)
+    return img, Art(rect, None, None)
 
 
 def _polaroid_photo(animal: dict | None) -> Image.Image | None:
@@ -1848,14 +1885,50 @@ def _polaroid_photo(animal: dict | None) -> Image.Image | None:
                        min(sheet.width, round(sb[2] + pad)),
                        min(sheet.height, round(sb[3] + pad))))
 
+def _immich_photo(photo: dict | None) -> Image.Image | None:
+    """The day's photo (datasources.get_photo) as stored, already upright.
+    None for no photo, and None with a warning if its file can't be read."""
+    if not photo:
+        return None
+    try:
+        return Image.open(photo["path"]).convert("RGB")
+    except (OSError, KeyError) as e:
+        log.warning("daily: no photo drawn, preview for %s unreadable: %s", photo.get("id"), e)
+        return None
 
-def _polaroid_size(aspect: float, room_h: float, X, Y) -> tuple[int, int]:
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _taken_text(iso: str | None) -> str | None:
+    """"19 Aug 2026" for an ISO date; None for none (the clause is dropped)."""
+    if not iso:
+        return None
+    try:
+        d = date.fromisoformat(iso)
+    except ValueError:
+        log.warning("daily: photo date %r unreadable, left off", iso)
+        return None
+    return f"{d.day} {_MONTHS[d.month - 1]} {d.year}"
+
+
+class _Card(NamedTuple):
+    """One polaroid: its photo, the foot's height (layout px) and what is
+    written on the foot, (place, date) with either None, or None for a
+    blank foot."""
+    photo: Image.Image
+    foot: int
+    writing: tuple[str | None, str | None] | None = None
+
+
+def _polaroid_size(aspect: float, room_h: float, X, Y,
+                   foot: int = POLAROID_FOOT) -> tuple[int, int]:
     """The photo's size (w, h) at `aspect` (w/h): as wide as
     POLAROID_PHOTO_MAX_W allows, shrunk uniformly so the tilted card is at
     most `room_h` tall."""
     a = math.radians(abs(POLAROID_TILT))
     sin, cos = math.sin(a), math.cos(a)
-    side, ends = 2 * X(POLAROID_SIDE), Y(POLAROID_TOP) + Y(POLAROID_FOOT)
+    side, ends = 2 * X(POLAROID_SIDE), Y(POLAROID_TOP) + Y(foot)
     # A tilted card's height: its width * sin + its height * cos.
     ph = (room_h - side * sin - ends * cos) / (aspect * sin + cos)
     pw = min(X(POLAROID_PHOTO_MAX_W), ph * aspect)
@@ -1863,43 +1936,183 @@ def _polaroid_size(aspect: float, room_h: float, X, Y) -> tuple[int, int]:
     return pw, max(1, int(pw / aspect))
 
 
-def _draw_polaroid(img: Image.Image, photo: Image.Image, caption, list_top: int, X, Y):
-    """The photo as a tilted polaroid with a soft shadow, hung on twine
-    through punched holes: in from over the top border left of the
-    `caption`, and out of the bottom hole fading into the todo list at
-    `list_top`. Centred at POLAROID_CX between the caption and
-    POLAROID_BOTTOM. Returns the card's rectangle (frame px)."""
-    from PIL import ImageFilter
-    top = caption[3] + Y(POLAROID_CLEAR)
-    bottom = min(Y(POLAROID_BOTTOM), list_top - Y(POLAROID_CLEAR))
-    pw, ph = _polaroid_size(photo.width / photo.height, bottom - top, X, Y)
-    ss = TWINE_SS
-    side, top_b, foot = X(POLAROID_SIDE), Y(POLAROID_TOP), Y(POLAROID_FOOT)
-    cw, ch = pw + 2 * side, top_b + ph + foot
+def _pair_sizes(aspects, avail: float, border: float, tuck: float, X, Y):
+    """Photo sizes [(w, h), (w, h)] and the gap between the two cards (layout
+    px, negative when the second tucks under the first) for a pair stacked in
+    `avail` px of height, `border` of which is the cards' top borders and
+    feet. Each photo is as wide as POLAROID_PHOTO_MAX_W allows; if the pair
+    doesn't fit, the second card first tucks up to `tuck` under the first,
+    then the taller photo is cut down to the other's height, then both
+    shrink together (a level cap, as the mockup's sizePair)."""
+    hs = [X(POLAROID_PHOTO_MAX_W) / a for a in aspects]
+    room = avail - border + tuck
+    if sum(hs) > room:
+        low = min(hs)
+        cap = room / 2 if 2 * low >= room else room - low
+        hs = [min(h, cap) for h in hs]
+    gap = max(-tuck, min(Y(POLAROID_PAIR_GAP), avail - border - sum(hs)))
+    sizes = []
+    for h, a in zip(hs, aspects):
+        pw = max(1, int(h * a))
+        sizes.append((pw, max(1, int(pw / a))))
+    return sizes, gap
 
-    # The card, upright and supersampled, then turned.
-    card = Image.new("RGBA", (cw * ss, ch * ss), (0, 0, 0, 0))
-    cd = ImageDraw.Draw(card)
+
+def _turn(cx: float, cy: float, tilt: float):
+    """Card-centred px → frame px for a card centred at (cx, cy) and turned
+    `tilt` degrees clockwise."""
+    t = math.radians(tilt)
+
+    def at(lx, ly):
+        return (cx + lx * math.cos(t) - ly * math.sin(t),
+                cy + lx * math.sin(t) + ly * math.cos(t))
+    return at
+
+
+def _line_y(p, q, x: float) -> float:
+    return p[1] + (x - p[0]) * (q[1] - p[1]) / ((q[0] - p[0]) or 1e-9)
+
+
+class _Hung(NamedTuple):
+    """A card's place on the frame: photo size, centre and tilt."""
+    pw: int
+    ph: int
+    cx: float
+    cy: float
+    tilt: float
+
+
+def _pair_layout(cards, top: float, bottom: float, width: int, X, Y) -> tuple[list[_Hung], bool]:
+    """Where the two cards hang between `top` and `bottom`, and whether the
+    twine between them shows (False when the second tucks under the
+    first). The first card covers at most the second's top border: the
+    tuck is cut back until the first card's bottom edge, tilted, stays
+    above the second's photo along their whole shared width."""
+    side, top_b = X(POLAROID_SIDE), Y(POLAROID_TOP)
+    tilts = POLAROID_PAIR_TILTS
+    # Room for the turned cards' corners, at the widest card.
+    cw_max = X(POLAROID_PHOTO_MAX_W) + 2 * side
+    reach = [cw_max * math.sin(math.radians(abs(t))) / 2 for t in tilts]
+    avail = bottom - top - sum(reach)
+    border = sum(top_b + Y(c.foot) for c in cards)
+    aspects = [c.photo.width / c.photo.height for c in cards]
+    tuck = Y(POLAROID_TUCK)
+    for _ in range(4):
+        sizes, gap = _pair_sizes(aspects, avail, border, tuck, X, Y)
+        spread = X(POLAROID_PAIR_SPREAD[1] if gap < 0 else POLAROID_PAIR_SPREAD[0])
+        hung, y = [], top + reach[0]
+        for (pw, ph), card, tilt, sx in zip(sizes, cards, tilts, (-spread, spread)):
+            cw, ch = pw + 2 * side, top_b + ph + Y(card.foot)
+            a = math.radians(abs(tilt))
+            half_w = (cw * math.cos(a) + ch * math.sin(a)) / 2
+            cx = min(X(POLAROID_CX) + sx, width - X(POLAROID_EDGE) - half_w)
+            hung.append(_Hung(pw, ph, cx, y + ch / 2, tilt))
+            y += ch + gap
+        if gap >= 0:
+            return hung, True
+        # How far the first card's bottom edge reaches past the top of the
+        # second's photo, over the width they share.
+        h0, h1 = hung
+        ch0 = top_b + h0.ph + Y(cards[0].foot)
+        ch1 = top_b + h1.ph + Y(cards[1].foot)
+        a0, b0 = (_turn(h0.cx, h0.cy, h0.tilt)(sx * (h0.pw / 2 + side), ch0 / 2) for sx in (-1, 1))
+        a1, b1 = (_turn(h1.cx, h1.cy, h1.tilt)(sx * h1.pw / 2, -ch1 / 2 + top_b) for sx in (-1, 1))
+        lo, hi = max(a0[0], a1[0]), min(b0[0], b1[0])
+        over = max(_line_y(a0, b0, x) + Y(POLAROID_TUCK_CLEAR) - _line_y(a1, b1, x)
+                   for x in (lo, hi))
+        if lo > hi or over <= 0:
+            return hung, False
+        tuck = max(0.0, -gap - over)
+    return hung, gap >= 0
+
+
+def _hand(size: int, weight: int) -> ImageFont.FreeTypeFont:
+    """Caveat, the marker hand, at a weight on its variable axis (400-700;
+    its named instances are only Regular and Bold)."""
+    f = ImageFont.truetype(config.FONT_HAND_PATH, size)
+    f.set_variation_by_axes([weight])
+    return f
+
+
+def _fit_place(d: ImageDraw.ImageDraw, text: str, max_w: float, s: int, Y):
+    """(text, size) for the large line of a photo's foot: the largest of
+    POLAROID_HAND_SIZES that fits; a place too long even at the smallest
+    drops its region ("Brooklyn Bridge, New York" → "Brooklyn Bridge"), and
+    what still won't fit is cut with an ellipsis."""
+    big, small = POLAROID_HAND_SIZES
+    candidates = [text]
+    if "," in text:
+        candidates.append(text.split(",")[0].strip())
+    for t in candidates:
+        for z in range(big, small - 1, -1):
+            if d.textlength(t, font=_hand(Y(z) * s, POLAROID_HAND_PLACE_W)) <= max_w:
+                return t, z
+    return _fit(d, candidates[-1], _hand(Y(small) * s, POLAROID_HAND_PLACE_W), int(max_w)), small
+
+
+def _write_foot(card: Image.Image, writing, pw: int, x: int, y: int, foot: int,
+                s: int, Y) -> None:
+    """Where and when on a card's foot, in the marker hand and turned a
+    touch anticlockwise: the place large with the date under it smaller;
+    either alone takes the large size in the middle; neither leaves the
+    foot blank. `card` is drawn at scale `s`; (x, y) is the foot's
+    top-left over the photo's width."""
+    place, when = writing
+    if not (place or when):
+        return
+    layer = Image.new("RGBA", (pw * s, Y(foot) * s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    max_w, mid = (pw - 8) * s, layer.width / 2
+    if place and when:
+        text, z = _fit_place(d, place, max_w, s, Y)
+        d.text((mid, Y(44) * s), text, font=_hand(Y(z) * s, POLAROID_HAND_PLACE_W),
+               fill=POLAROID_HAND_INK, anchor="ms")
+        d.text((mid, Y(76) * s), when, font=_hand(Y(POLAROID_HAND_DATE) * s, POLAROID_HAND_DATE_W),
+               fill=POLAROID_HAND_INK, anchor="ms")
+    else:
+        text, z = _fit_place(d, place or when, max_w, s, Y)
+        d.text((mid, Y(56) * s), text, font=_hand(Y(z) * s, POLAROID_HAND_PLACE_W),
+               fill=POLAROID_HAND_INK, anchor="ms")
+    layer = layer.rotate(POLAROID_HAND_TURN, resample=Image.BICUBIC)
+    card.alpha_composite(layer, (x * s, y * s))
+
+
+def _card_image(card: _Card, pw: int, ph: int, tilt: float, X, Y):
+    """The card drawn upright and supersampled, then turned `tilt` degrees
+    clockwise and brought to frame scale: (RGBA image, its upright width
+    and height, its hole centres in upright card px)."""
+    ss = TWINE_SS
+    side, top_b, foot = X(POLAROID_SIDE), Y(POLAROID_TOP), Y(card.foot)
+    cw, ch = pw + 2 * side, top_b + ph + foot
+    img = Image.new("RGBA", (cw * ss, ch * ss), (0, 0, 0, 0))
+    cd = ImageDraw.Draw(img)
     cd.rounded_rectangle([0, 0, cw * ss - 1, ch * ss - 1], radius=3 * ss, fill=WHITE,
                          outline=POLAROID_INK, width=2 * ss)
-    card.paste(photo.resize((pw * ss, ph * ss), Image.LANCZOS), (side * ss, top_b * ss))
-    edge = Image.new("RGBA", card.size, (0, 0, 0, 0))   # the photo's own faint edge
+    img.paste(card.photo.resize((pw * ss, ph * ss), Image.LANCZOS), (side * ss, top_b * ss))
+    edge = Image.new("RGBA", img.size, (0, 0, 0, 0))   # the photo's own faint edge
     ImageDraw.Draw(edge).rectangle([side * ss, top_b * ss, (side + pw) * ss - 1,
                                     (top_b + ph) * ss - 1], outline=(0, 0, 0, 77),
                                    width=round(1.5 * ss))
-    card = Image.alpha_composite(card, edge)
-    cd = ImageDraw.Draw(card)
+    img = Image.alpha_composite(img, edge)
+    if card.writing:
+        _write_foot(img, card.writing, pw, side, top_b + ph, card.foot, ss, Y)
+    cd = ImageDraw.Draw(img)
     holes = [(cw / 2, Y(POLAROID_HOLE_IN)), (cw / 2, ch - Y(POLAROID_HOLE_IN))]
     r = POLAROID_HOLE_R * ss
     for hx, hy in holes:
         cd.ellipse([hx * ss - r, hy * ss - r, hx * ss + r, hy * ss + r],
                    fill=POLAROID_HOLE, outline=POLAROID_INK, width=round(1.6 * ss))
     # PIL turns anticlockwise for a positive angle; the tilt is clockwise-positive.
-    card = card.rotate(-POLAROID_TILT, resample=Image.BICUBIC, expand=True)
-    card = card.resize((round(card.width / ss), round(card.height / ss)), Image.LANCZOS)
-    cx, cy = X(POLAROID_CX), (top + bottom) / 2
-    x0, y0 = round(cx - card.width / 2), round(cy - card.height / 2)
+    img = img.rotate(-tilt, resample=Image.BICUBIC, expand=True)
+    img = img.resize((round(img.width / ss), round(img.height / ss)), Image.LANCZOS)
+    return img, cw, ch, holes
 
+
+def _hang(img: Image.Image, card: Image.Image, cx: float, cy: float, X, Y):
+    """Paste a turned card centred at (cx, cy) with its soft shadow.
+    Returns its rectangle."""
+    from PIL import ImageFilter
+    x0, y0 = round(cx - card.width / 2), round(cy - card.height / 2)
     (sx, sy), blur, opacity = POLAROID_SHADOW
     alpha = card.getchannel("A")
     reach = blur * 3
@@ -1908,17 +2121,38 @@ def _draw_polaroid(img: Image.Image, photo: Image.Image, caption, list_top: int,
     shadow = shadow.filter(ImageFilter.GaussianBlur(blur / 2))
     img.paste(BLACK, (x0 - reach + X(sx), y0 - reach + Y(sy)), shadow)
     img.paste(card.convert("RGB"), (x0, y0), alpha)
+    return (x0, y0, x0 + card.width, y0 + card.height)
 
-    # Where the holes ended up after the turn.
-    t = math.radians(POLAROID_TILT)
 
-    def turned(px, py):
-        lx, ly = px - cw / 2, py - ch / 2
-        return (cx + lx * math.cos(t) - ly * math.sin(t),
-                cy + lx * math.sin(t) + ly * math.cos(t))
-    hole_top, hole_bottom = turned(*holes[0]), turned(*holes[1])
-    rect = (x0, y0, x0 + card.width, y0 + card.height)
-    _draw_twine(img, hole_top, hole_bottom, rect[3], list_top, X, Y)
+def _draw_polaroids(img: Image.Image, cards: list[_Card], top: float, list_top: int,
+                    X, Y) -> tuple[int, int, int, int]:
+    """Hang one or two cards, as tilted polaroids with soft shadows, on one
+    twine through their punched holes: in from over the top border left of
+    the caption, through each card, and out of the last one's bottom hole
+    fading into the todo list at `list_top`. They hang between `top` and
+    POLAROID_BOTTOM (and POLAROID_CLEAR above the list). One card is
+    centred at POLAROID_CX, tilted POLAROID_TILT; a pair is stacked from
+    `top` (_pair_layout), the first drawn over the second. Returns the
+    rectangle around the cards (frame px)."""
+    bottom = min(Y(POLAROID_BOTTOM), list_top - Y(POLAROID_CLEAR))
+    if len(cards) == 1:
+        c = cards[0]
+        pw, ph = _polaroid_size(c.photo.width / c.photo.height, bottom - top, X, Y, c.foot)
+        hung, joined = [_Hung(pw, ph, X(POLAROID_CX), (top + bottom) / 2, POLAROID_TILT)], True
+    else:
+        hung, joined = _pair_layout(cards, top, bottom, img.width, X, Y)
+    drawn = []
+    for c, h in zip(cards, hung):
+        card, cw, ch, holes = _card_image(c, h.pw, h.ph, h.tilt, X, Y)
+        at = _turn(h.cx, h.cy, h.tilt)
+        drawn.append((card, h, [at(hx - cw / 2, hy - ch / 2) for hx, hy in holes]))
+    rects = {}
+    for i in reversed(range(len(drawn))):     # the first card hangs over the second
+        card, h, _ = drawn[i]
+        rects[i] = _hang(img, card, h.cx, h.cy, X, Y)
+    rect = (min(r[0] for r in rects.values()), min(r[1] for r in rects.values()),
+            max(r[2] for r in rects.values()), max(r[3] for r in rects.values()))
+    _draw_twine(img, [holes for _, _, holes in drawn], joined, rect[3], list_top, X, Y)
     return rect
 
 
@@ -1972,13 +2206,15 @@ def _knot(d: ImageDraw.ImageDraw, x: float, y: float, s: float) -> None:
     d.line([(x - 3 * s, y - 2 * s), (x + 2 * s, y + 3 * s)], fill=TWINE_PLY + (255,),
            width=max(1, round(1.2 * s)))
 
-
-def _draw_twine(img: Image.Image, hole_top, hole_bottom, card_bottom: int,
+def _draw_twine(img: Image.Image, holes, joined: bool, cards_bottom: int,
                 list_top: int, X, Y) -> None:
-    """The twine on its own layer, composited over the card: in from above
-    the top border, curving into the top hole, and out of the bottom hole
-    down towards the todo list, fading out between the card and the list's
-    top."""
+    """The twine on its own layer, composited over the cards: in from above
+    the top border, curving into the first card's top hole, out of its
+    bottom hole into the next card's top hole (unless `joined` is False:
+    the second card is tucked under the first and that run is hidden), and
+    out of the last bottom hole down towards the todo list, fading out
+    between the cards and the list's top. `holes` is [(top, bottom)] per
+    card, frame px."""
     from PIL import ImageChops
     ss = TWINE_SS
     # The layer covers the right half: the twine never reaches further left.
@@ -1988,19 +2224,27 @@ def _draw_twine(img: Image.Image, hole_top, hole_bottom, card_bottom: int,
 
     def at(p):
         return ((p[0] - lx0) * ss, p[1] * ss)
+    first_top, last_bottom = holes[0][0], holes[-1][1]
     # Down at TWINE_TOP_X, well left of the caption (at most X(400) wide,
     # right-aligned), turning towards the hole only below it: the card's
     # top is POLAROID_CLEAR under the caption.
-    top_run = _quad((X(TWINE_TOP_X), -Y(12)), (X(TWINE_TOP_X), hole_top[1]), hole_top, 3)
-    tail = _bowed(hole_bottom, (X(POLAROID_CX + 4), list_top + Y(30)), 16, 3)
-    for run in (top_run, tail):
+    runs = [_quad((X(TWINE_TOP_X), -Y(12)), (X(TWINE_TOP_X), first_top[1]), first_top, 3)]
+    if len(holes) > 1 and joined:
+        runs.append(_bowed(holes[0][1], holes[1][0], TWINE_PAIR_BOW, 3))
+    runs.append(_bowed(last_bottom, (X(POLAROID_CX + 4), list_top + Y(30)), 16, 3))
+    for run in runs:
         _rope(d, [at(p) for p in run], ss)
-    _knot(d, *at((hole_top[0], hole_top[1] - 1)), ss)
-    _knot(d, *at((hole_bottom[0], hole_bottom[1] + 1)), ss)
+    knots = [(first_top, -1), (holes[0][1], 1)]
+    if len(holes) > 1:
+        if joined:
+            knots.append((holes[1][0], -1))
+        knots.append((holes[1][1], 1))
+    for (x, y), dy in knots:
+        _knot(d, *at((x, y + dy)), ss)
     layer = layer.resize((img.width - lx0, img.height), Image.LANCZOS)
 
-    # Fade the tail out between just below the card and the list's top.
-    f0, f1 = card_bottom + Y(10), list_top
+    # Fade the tail out between just below the cards and the list's top.
+    f0, f1 = cards_bottom + Y(10), list_top
     ramp = Image.new("L", (1, img.height))
     ramp.putdata([255 if y <= f0 else 0 if y >= f1 else round(255 * (f1 - y) / (f1 - f0))
                   for y in range(img.height)])

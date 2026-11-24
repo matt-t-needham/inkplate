@@ -69,6 +69,21 @@ PLANNER_EXPORT = (Path(os.environ["INKPLATE_PLANNER_EXPORT"])
 # screens say it is offline (twice the cadence, so one missed write is fine).
 PLANNER_STALE_S = 2 * 3600
 
+# ── Daily photo (Immich, DECISIONS §32) ───────────────────────────────────────
+# The portrait daily screen hangs one photo a day from the household's Immich
+# under the animal print. The key is read-only (asset.read and search); with
+# it unset the photo slot is off. Secrets come from bix-infra/.env.
+IMMICH_URL = os.environ.get("IMMICH_URL", "http://immich-server:2283/api").rstrip("/")
+IMMICH_FRAME_API_KEY = os.environ.get("IMMICH_FRAME_API_KEY", "")
+# The day's photo is chosen from photos taken in this many months, falling
+# back to any older photo when the window has none.
+PHOTO_WINDOW_MONTHS = 18
+# After a failed pick, the next render waits this long before asking again
+# (the last good pick, or no photo, is shown meanwhile).
+PHOTO_RETRY_S = 3600
+# Cached previews kept in DATA_DIR/cache/photo/, newest first.
+PHOTO_KEEP = 3
+
 # ── Retention ─────────────────────────────────────────────────────────────────
 # ndjson logs are capped by line count on write (cheap, no cron needed).
 MAX_CHECKIN_LINES = int(os.environ.get("INKPLATE_MAX_CHECKINS", "5000"))
@@ -94,6 +109,9 @@ FONT_DISPLAY_PATHS = [
 FONT_WEATHER_PATHS = [
     str(_APP_DIR / "fonts" / "weathericons-regular-webfont.ttf"),
 ]
+# Caveat (SIL OFL 1.1), a variable font with a weight axis: the photo
+# polaroid's handwriting (DECISIONS §32).
+FONT_HAND_PATH = str(_APP_DIR / "fonts" / "Caveat-Variable.ttf")
 FONT_SERIF_ITALIC_PATHS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf",  # host dev fallback
