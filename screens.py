@@ -11,7 +11,10 @@ Screens:
                     seasonal snow report; its own
                     portrait layout when taller than wide
 - daily           — this week's calendar and the todo list beside the daily
-                    animal (example data until the planner exists)
+                    animal (todos from the planner; example events)
+- planner         — the daily screen or the bingo card, as the planner's
+                    export asks
+- bingo           — the planner's chosen 4x4 bingo card
 - placeholder     — proves the whole pipeline end to end
 - palette_test    — six solid color bands; verifies color mapping on the panel
 - dither_test     — gradients; judges dither quality
@@ -28,6 +31,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 import config
 import datasources
+import planner_source
 from palette import SPECTRA_COLORS
 
 log = logging.getLogger("inkplate.screens")
@@ -429,10 +433,14 @@ def panel_layout(cfg: dict, size: tuple[int, int]) -> str | None:
     """The art layout the panel draws at this frame size: the daily screen's
     own, else the dashboard's — landscape, or the configured portrait
     layout. None for the portrait daily screen, whose print is shown whole
-    and can't be placed."""
+    and can't be placed, and for bingo (no print); "planner" is resolved
+    first."""
     width, height = size
-    if cfg.get("screen") == "daily":
+    screen = drawn_screen(cfg.get("screen"))
+    if screen == "daily":
         return DAILY_LAYOUT if width >= height else None
+    if screen == "bingo":
+        return None
     if height > width:
         lay = cfg.get("portrait_layout")
         return lay if lay in PORTRAIT_LAYOUTS else DEFAULT_PORTRAIT_LAYOUT
@@ -532,9 +540,8 @@ def _page(screen: str, animal: dict | None, cfg: dict, size: tuple[int, int]):
     can't be placed (panel_layout gives no layout)."""
     width, height = size
     if screen == "daily":
-        import planner_stub
         today = date.today()
-        img, art = _daily(width, height, animal, planner_stub.get_planner(today), today)
+        img, art = _daily(width, height, animal, planner_source.get_planner(today), today)
         if panel_layout({"screen": screen}, size) is None:
             return img, art, None, None
         box, mode = art_box(width, height, DAILY_LAYOUT, False)
@@ -1724,13 +1731,12 @@ def _draw_daily_caption(img: Image.Image, animal: dict, art_rect, right: int, to
 
 def daily(width: int, height: int) -> Image.Image:
     """This week's calendar and the todo list beside the daily animal. The
-    calendar and list are example data (planner_stub) until the shared
-    calendar feed and the planner service exist."""
+    todos come from the planner's export (planner_source); the calendar is
+    example data until the shared calendar feed exists."""
     import state
-    import planner_stub
     cfg = state.load_config()
     today = date.today()
-    return _daily(width, height, _animal(cfg), planner_stub.get_planner(today), today)[0]
+    return _daily(width, height, _animal(cfg), planner_source.get_planner(today), today)[0]
 
 
 def _daily(width: int, height: int, animal: dict | None, planner: dict, today: date):
@@ -1760,13 +1766,35 @@ def _daily(width: int, height: int, animal: dict | None, planner: dict, today: d
     return img, art
 
 
+STALE_ROW_H = 46   # the offline marker's row, above the footer line
+
+
 def _daily_footer(d: ImageDraw.ImageDraw, planner: dict, height: int, X, Y) -> int:
-    """"Example data" bottom-left while the planner is the stub. Returns
-    the footer's top."""
+    """Bottom-left: "Example data" while the planner is the stub, "Example
+    events" while only the calendar is, and above it the offline marker
+    when the export is stale. Returns the footer's top."""
     foot_top = height - Y(8) - Y(28)
-    if planner.get("example"):
-        d.text((X(DAILY_MARGIN), foot_top), "Example data", font=_font(Y(24)), fill=BLACK)
+    label = ("Example data" if planner.get("example")
+             else "Example events" if planner.get("example_events") else None)
+    if label:
+        d.text((X(DAILY_MARGIN), foot_top), label, font=_font(Y(24)), fill=BLACK)
+    if planner.get("stale"):
+        foot_top -= Y(STALE_ROW_H)
+        _stale_marker(d, X(DAILY_MARGIN), foot_top, planner["stale"], X, Y)
     return foot_top
+
+
+
+def _stale_marker(d: ImageDraw.ImageDraw, x: int, top: int, text: str, X, Y) -> None:
+    """An outlined warning triangle with "!" and the words beside it: the
+    planner export is old."""
+    h = Y(34)
+    w = round(h * 1.15)
+    y0 = top + (Y(STALE_ROW_H) - h) // 2
+    d.polygon([(x + w / 2, y0), (x + w, y0 + h), (x, y0 + h)], fill=WHITE,
+              outline=BLACK, width=max(2, Y(3)))
+    _centered_text(d, (x + w / 2, y0 + h * 0.62), "!", _font(round(h * 0.62), bold=True), BLACK)
+    d.text((x + w + X(12), y0 + h / 2), text, font=_font(Y(24)), fill=BLACK, anchor="lm")
 
 
 def _daily_portrait(width: int, height: int, animal: dict | None, planner: dict,
@@ -1981,6 +2009,155 @@ def _draw_twine(img: Image.Image, hole_top, hole_bottom, card_bottom: int,
     img.paste(Image.alpha_composite(region, layer).convert("RGB"), (lx0, 0))
 
 
+# ── bingo ─────────────────────────────────────────────────────────────────────
+# One of the planner's 4x4 bingo cards, the one its `bingo_card` names
+# (DECISIONS §31). A done square gets a "dobber": a stippled disc with a
+# solid rim in one ink, the summary still legible over it.
+
+BINGO_INK = RED
+BINGO_RULE = 2             # the grid's hairlines, layout px
+BINGO_HEADER_H = 96        # title row, above the rule under it
+BINGO_PAD = 24             # inside a cell, around its summary
+BINGO_TEXT_PX = (46, 20)   # a summary's largest and smallest type
+BINGO_LINE_H = 1.35        # a summary's line height, as a share of its type size
+BINGO_DOBBER_R = 0.44      # the disc's radius, as a share of the cell's shorter side
+# A done square's summary stays inside its disc: its block's corners lie
+# within this share of the radius (clear of the rim and the halo).
+BINGO_TEXT_IN_DISC = 0.85
+BINGO_RIM = 6              # layout px
+# The stipple: 2x2 dots of ink on a grid of this pitch (px), every other dot
+# row offset, about a fifth of the disc. Pure ink, so Floyd-Steinberg leaves
+# it as drawn (no special dither needed).
+BINGO_STIPPLE_PITCH = 3
+
+
+def _stipple(size: tuple[int, int]) -> Image.Image:
+    """A frame-sized 'L' mask of the stipple dots (255 = ink), fixed to the
+    frame's pixel grid so every disc shares one regular pattern."""
+    n = BINGO_STIPPLE_PITCH
+    tile = Image.new("L", (2 * n, 2 * n), 0)
+    td = ImageDraw.Draw(tile)
+    td.rectangle([0, 0, 1, 1], fill=255)
+    td.rectangle([n, n, n + 1, n + 1], fill=255)
+    out = Image.new("L", size, 0)
+    for ty in range(0, size[1], 2 * n):
+        for tx in range(0, size[0], 2 * n):
+            out.paste(tile, (tx, ty))
+    return out
+
+
+def _dobber(img: Image.Image, stipple: Image.Image, cx: float, cy: float, r: float,
+            rim: int) -> None:
+    """The bingo dobber: a stippled disc and a solid rim, in BINGO_INK."""
+    disc = Image.new("L", img.size, 0)
+    ImageDraw.Draw(disc).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+    dots = Image.new("L", img.size, 0)
+    dots.paste(stipple, (0, 0), disc)
+    img.paste(BINGO_INK, (0, 0), dots)
+    ImageDraw.Draw(img).ellipse([cx - r, cy - r, cx + r, cy + r], outline=BINGO_INK,
+                                width=rim)
+
+
+def _fit_summary(d: ImageDraw.ImageDraw, text: str, max_w: int, max_h: int, Y,
+                 disc_r: float | None = None) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont,
+                                                       int, list[str]]:
+    """The largest Michroma size at which `text` wraps into the box (and,
+    given `disc_r`, into a circle that radius: the wider the block is
+    allowed, the shorter it must be), and its lines (at most three). At the
+    smallest size, lines are cut to fit. In a disc a two-word summary takes
+    a line per word."""
+    big, small = BINGO_TEXT_PX
+    words = text.split()
+    one_per_line = disc_r is not None and len(words) == 2
+    for size in range(Y(big), Y(small) - 1, -2):
+        f = _font(size, style="display")
+        for n in ((2, 3) if one_per_line else (1, 2, 3)):
+            h = n * size * BINGO_LINE_H
+            w = max_w
+            if disc_r is not None:
+                half = (disc_r * BINGO_TEXT_IN_DISC) ** 2 - (h / 2) ** 2
+                if half <= 0:
+                    break
+                w = min(w, int(2 * math.sqrt(half)))
+            lines = words if one_per_line and n == 2 else _wrap(d, text, f, w)
+            if (len(lines) <= n and h <= max_h
+                    and all(d.textlength(ln, font=f) <= w for ln in lines)):
+                return f, size, lines
+    f = _font(Y(small), style="display")
+    return f, Y(small), [_fit(d, ln, f, max_w) for ln in _wrap(d, text, f, max_w)[:3]]
+
+
+def bingo(width: int, height: int) -> Image.Image:
+    """The planner's chosen bingo card (planner_source.get_bingo; the stub's
+    example card, labelled, without an export)."""
+    return _bingo(width, height, planner_source.get_bingo(date.today()))
+
+
+def _bingo(width: int, height: int, card: dict) -> Image.Image:
+    img = Image.new("RGB", (width, height), WHITE)
+    portrait = height > width
+    X, Y = _scalers(width, height, PORTRAIT if portrait else LANDSCAPE)
+    d = ImageDraw.Draw(img)
+    m = X(DAILY_MARGIN)
+    foot_top = _daily_footer(d, card, height, X, Y)
+
+    # Header: the card's title and its owner's tag left, the count right.
+    f_title = _font(Y(52), style="display")
+    top = Y(DAILY_MARGIN)
+    mid = top + Y(BINGO_HEADER_H) // 2 - Y(8)
+    d.text((m, mid), card["title"], font=f_title, fill=BLACK, anchor="lm")
+    tag_x = m + int(d.textlength(card["title"], font=f_title)) + X(24)
+    _owner_tag(d, tag_x, mid - Y(23), X(72), Y(46), card["owner"], _font(Y(30)),
+               outline=max(1, X(4)))
+    squares = card["squares"]
+    done = sum(1 for sq in squares if sq["done"])
+    d.text((width - m, mid), f"{done} / {len(squares)}", font=_font(Y(40), style="display"),
+           fill=BLACK, anchor="rm")
+
+    # The grid, edge to edge between the margins.
+    rule = max(1, Y(BINGO_RULE))
+    gx0, gy0 = m, top + Y(BINGO_HEADER_H)
+    gx1, gy1 = width - m, foot_top - Y(16)
+    cw, ch = (gx1 - gx0) / planner_source.GRID, (gy1 - gy0) / planner_source.GRID
+    stipple = _stipple(img.size)
+    r = BINGO_DOBBER_R * min(cw, ch)
+    for sq in squares:
+        if sq["done"]:
+            _dobber(img, stipple, gx0 + (sq["col"] + 0.5) * cw, gy0 + (sq["row"] + 0.5) * ch,
+                    r, max(2, Y(BINGO_RIM)))
+    for i in range(planner_source.GRID + 1):
+        x = round(gx0 + i * cw)
+        y = round(gy0 + i * ch)
+        d.line([(x, gy0), (x, gy1)], fill=BLACK, width=rule)
+        d.line([(gx0, y), (gx1, y)], fill=BLACK, width=rule)
+
+    pad = X(BINGO_PAD)
+    for sq in squares:
+        f, size, lines = _fit_summary(d, sq["summary"], int(cw) - 2 * pad, int(ch) - 2 * pad,
+                                      Y, disc_r=r if sq["done"] else None)
+        cx, cy = gx0 + (sq["col"] + 0.5) * cw, gy0 + (sq["row"] + 0.5) * ch
+        lh = size * BINGO_LINE_H
+        halo = {"stroke_width": max(2, Y(4)), "stroke_fill": WHITE} if sq["done"] else {}
+        for i, ln in enumerate(lines):
+            d.text((cx, cy + (i - (len(lines) - 1) / 2) * lh), ln, font=f, fill=BLACK,
+                   anchor="mm", **halo)
+    return img
+
+
+# ── planner ───────────────────────────────────────────────────────────────────
+# The pane's "Planner" choice: whichever planner screen the export's `view`
+# asks for (daily without one).
+
+def drawn_screen(screen: str | None) -> str | None:
+    """The screen actually drawn for a configured one: "planner" becomes the
+    export's view, anything else is itself."""
+    return planner_source.view() if screen == "planner" else screen
+
+
+def planner(width: int, height: int) -> Image.Image:
+    return SCREENS[drawn_screen("planner")](width, height)
+
+
 def placeholder(width: int, height: int) -> Image.Image:
     """Default screen until real dashboard content exists."""
     img = Image.new("RGB", (width, height), (255, 255, 255))
@@ -2072,6 +2249,8 @@ def alignment(width: int, height: int) -> Image.Image:
 SCREENS = {
     "dashboard": dashboard,
     "daily": daily,
+    "planner": planner,
+    "bingo": bingo,
     "placeholder": placeholder,
     "palette_test": palette_test,
     "dither_test": dither_test,

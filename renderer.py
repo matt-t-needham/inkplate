@@ -11,7 +11,8 @@ Files written per render (atomically, tmp + replace):
   render/panel.png     — muted-palette simulation (control-pane preview)
   render/frame.png     — dithered.png turned to the panel's native 1600x1200
                          orientation: what the device downloads
-  render/meta.json     — {rendered_at, screen, rotation, image_version, render_ms}
+  render/meta.json     — {rendered_at, screen, drawn (the screen "planner"
+                         resolved to), rotation, image_version, render_ms}
 
 Rotation: the screen is drawn upright at whatever size the hanging calls for
 (1200x1600 when the panel is on its side) and the three previews stay upright
@@ -69,7 +70,9 @@ def render(force_new_version: bool = False) -> dict:
     rotation = cfg["rotation"]
     t0 = time.monotonic()
 
-    img = screens.SCREENS[screen_name](*upright_size(rotation))
+    # meta records what was drawn so ensure_fresh sees the view flip.
+    drawn = screens.drawn_screen(screen_name)
+    img = screens.SCREENS[drawn](*upright_size(rotation))
     dithered = palette.dither_to_spectra(img)
     panel = palette.simulate_panel(dithered)
     frame = to_panel_frame(dithered, rotation)
@@ -94,6 +97,7 @@ def render(force_new_version: bool = False) -> dict:
     m = {
         "rendered_at": time.time(),
         "screen": screen_name,
+        "drawn": drawn,
         "rotation": rotation,
         "image_version": cfg["image_version"],
         "content_hash": content_hash,
@@ -142,18 +146,25 @@ def sleep_seconds(cfg: dict, now: float | None = None) -> int:
 
 
 def ensure_fresh() -> dict:
-    """Render if there is no cached frame, the screen changed, or the cache
-    predates the current wake slot. Returns current meta."""
-    cfg = state.load_config()
-    m = meta()
-    slot_start, _ = schedule(cfg)
-    stale = (
-        m is None
-        or m.get("screen") != cfg["screen"]
-        or m.get("rotation", 0) != cfg["rotation"]
-        or m.get("rendered_at", 0) < slot_start - config.WAKE_GRACE_S
-        or not dithered_path().exists()
-    )
+    """Render if there is no cached frame, the screen changed (including the
+    planner export flipping the "planner" screen's view), or the cache
+    predates the current wake slot. Returns current meta. Every failure is
+    logged here before it is raised (callers rely on that)."""
+    try:
+        cfg = state.load_config()
+        m = meta()
+        slot_start, _ = schedule(cfg)
+        stale = (
+            m is None
+            or m.get("screen") != cfg["screen"]
+            or m.get("drawn", m.get("screen")) != screens.drawn_screen(cfg["screen"])
+            or m.get("rotation", 0) != cfg["rotation"]
+            or m.get("rendered_at", 0) < slot_start - config.WAKE_GRACE_S
+            or not dithered_path().exists()
+        )
+    except Exception as e:
+        log.error("freshness check failed: %s", e, exc_info=True)
+        raise
     if stale:
         try:
             return render()

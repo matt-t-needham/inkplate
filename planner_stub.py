@@ -1,4 +1,5 @@
-"""EXAMPLE DATA, all made up, until the calendar feed and planner exist;
+"""EXAMPLE DATA, all made up: the fallback when the planner export is missing
+or unusable, and the events until the calendar feed exists (planner_source);
 `example: True` makes the screen say so. See DECISIONS §26.
 """
 
@@ -59,4 +60,25 @@ def get_planner(today: date) -> dict:
     return {"events": events,
             "todos": {"open": [{"owner": o, "title": t} for o, t in _OPEN],
                       "done": done},
+            "example": True}
+
+
+# A made-up bingo card for the bingo screen: 16 squares in reading order,
+# one or two words each (the planner refuses more), "x" = done (a full
+# second row among them, so a line shows).
+_BINGO = [
+    ("Run 10k", ""), ("Bake bread", "x"), ("Sea swim", ""), ("Ukulele", ""),
+    ("Fix bike", "x"), ("Plant bulbs", "x"), ("Museum day", "x"), ("Camp out", "x"),
+    ("Read books", ""), ("Make pasta", ""), ("Try climbing", "x"), ("Write letters", ""),
+    ("Live gig", ""), ("Hike peak", ""), ("Volunteer", ""), ("New recipe", ""),
+]
+
+
+def get_bingo() -> dict:
+    """{"title", "owner" (tag), "squares": [{row, col, summary, done}] in
+    reading order, "example": True}: the shape planner_source.get_bingo
+    returns from the real export."""
+    return {"title": "Together", "owner": "mk",
+            "squares": [{"row": i // 4, "col": i % 4, "summary": s, "done": d == "x"}
+                        for i, (s, d) in enumerate(_BINGO)],
             "example": True}
